@@ -43,7 +43,9 @@ module_param(record_size, ulong, 0400);
 MODULE_PARM_DESC(record_size,
 		"size of each dump done on oops/panic");
 
-static ulong ramoops_console_size = MIN_MEM_SIZE;
+//static ulong ramoops_console_size = MIN_MEM_SIZE;
+static ulong ramoops_console_size = 256*1024UL;
+
 module_param_named(console_size, ramoops_console_size, ulong, 0400);
 MODULE_PARM_DESC(console_size, "size of kernel console log");
 
@@ -51,12 +53,15 @@ static ulong ramoops_ftrace_size = MIN_MEM_SIZE;
 module_param_named(ftrace_size, ramoops_ftrace_size, ulong, 0400);
 MODULE_PARM_DESC(ftrace_size, "size of ftrace log");
 
-static ulong mem_address;
+//static ulong mem_address;
+static ulong mem_address=0x85000000;
+
 module_param(mem_address, ulong, 0400);
 MODULE_PARM_DESC(mem_address,
 		"start of reserved RAM used to store oops/panic logs");
 
-static ulong mem_size;
+//static ulong mem_size;
+static ulong mem_size = 0x00100000;
 module_param(mem_size, ulong, 0400);
 MODULE_PARM_DESC(mem_size,
 		"size of reserved RAM used to store oops/panic logs");
@@ -355,6 +360,7 @@ static int ramoops_init_prz(struct device *dev, struct ramoops_context *cxt,
 		return 0;
 
 	if (*paddr + sz - cxt->phys_addr > cxt->size) {
+              pr_err("Failed because of NOMEM\n");
 		dev_err(dev, "no room for mem region (0x%zx@0x%llx) in (0x%lx@0x%llx)\n",
 			sz, (unsigned long long)*paddr,
 			cxt->size, (unsigned long long)cxt->phys_addr);
@@ -380,6 +386,9 @@ static int ramoops_init_prz(struct device *dev, struct ramoops_context *cxt,
 void notrace ramoops_console_write_buf(const char *buf, size_t size)
 {
 	struct ramoops_context *cxt = &oops_cxt;
+
+       pr_err("+++ramoops_console_write_buf()\n");
+       
 	persistent_ram_write(cxt->cprz, buf, size);
 }
 
@@ -392,6 +401,8 @@ static int ramoops_probe(struct platform_device *pdev)
 	phys_addr_t paddr;
 	int err = -EINVAL;
 
+       pr_err("+++ramoops_probe()\n");
+       
 	/* Only a single ramoops area allowed at a time, so fail extra
 	 * probes.
 	 */
@@ -416,9 +427,11 @@ static int ramoops_probe(struct platform_device *pdev)
 
 	cxt->dump_read_cnt = 0;
 	cxt->size = pdata->mem_size;
+       pr_err("cxt->size = %d\n", (int)cxt->size);
 	cxt->phys_addr = pdata->mem_address;
 	cxt->record_size = pdata->record_size;
 	cxt->console_size = pdata->console_size;
+       pr_err("cxt->console_size = %d\n", (int)cxt->console_size);
 	cxt->ftrace_size = pdata->ftrace_size;
 	cxt->dump_oops = pdata->dump_oops;
 	cxt->ecc_info = pdata->ecc_info;
@@ -481,7 +494,11 @@ static int ramoops_probe(struct platform_device *pdev)
 	record_size = pdata->record_size;
 	dump_oops = pdata->dump_oops;
 
-	pr_info("attached 0x%lx@0x%llx, ecc: %d/%d\n",
+       pr_err("mem_size = %d\n", (int)mem_size);
+       pr_err("mem_address = %d\n", (int)mem_address);
+       pr_err("record_size = %d\n", (int)record_size);
+
+	pr_err("attached 0x%lx@0x%llx, ecc: %d/%d\n",
 		cxt->size, (unsigned long long)cxt->phys_addr,
 		cxt->ecc_info.ecc_size, cxt->ecc_info.block_size);
 
@@ -535,9 +552,11 @@ static struct platform_driver ramoops_driver = {
 static void ramoops_register_dummy(void)
 {
 	if (!mem_size)
-		return;
-
-	pr_info("using module parameters\n");
+	{
+            pr_err("mem_size is 0!!\n");
+	     return;
+	}
+	pr_err("using module parameters\n");
 
 	dummy_data = kzalloc(sizeof(*dummy_data), GFP_KERNEL);
 	if (!dummy_data) {

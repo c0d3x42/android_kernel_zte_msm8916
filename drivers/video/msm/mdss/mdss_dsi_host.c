@@ -70,7 +70,22 @@ struct mdss_dsi_event {
 static struct mdss_dsi_event dsi_event;
 
 static int dsi_event_thread(void *data);
-
+//modify by yujianhua for mdss_dsi_isr error 
+ static void mdss_dsi_set_reg(struct mdss_dsi_ctrl_pdata *ctrl, int off,
+ 						u32 mask, u32 val)
+ {
+ 	u32 data;
+ 
+ 	off &= ~0x03;
+ 	val &= mask;    /* set bits indicated at mask only */
+ 	data = MIPI_INP(ctrl->ctrl_base + off);
+ 	data &= ~mask;
+ 	data |= val;
+ 	pr_debug("%s: ndx=%d off=%x data=%x\n", __func__,
+ 				ctrl->ndx, off, data);
+ 	MIPI_OUTP(ctrl->ctrl_base + off, data);
+ }
+//modify by yujianhua for mdss_dsi_isr error end
 void mdss_dsi_ctrl_init(struct device *ctrl_dev,
 			struct mdss_dsi_ctrl_pdata *ctrl)
 {
@@ -1485,6 +1500,7 @@ static int mdss_dsi_cmd_dma_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 	int domain = MDSS_IOMMU_DOMAIN_UNSECURE;
 	char *bp;
 	struct mdss_dsi_ctrl_pdata *mctrl = NULL;
+	int ignored = 0;	//modify by yujianhua for mdss_dsi_isr error 
 
 	bp = tp->data;
 
@@ -1505,17 +1521,31 @@ static int mdss_dsi_cmd_dma_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 	}
 
 	INIT_COMPLETION(ctrl->dma_comp);
-
+//modify by yujianhua for mdss_dsi_isr error 
+	if (ctrl->panel_mode == DSI_VIDEO_MODE)
+		ignored = 1;
+//modify by yujianhua for mdss_dsi_isr error end
 	if (mdss_dsi_sync_wait_trigger(ctrl)) {
 		/* broadcast same cmd to other panel */
 		mctrl = mdss_dsi_get_other_ctrl(ctrl);
 		if (mctrl && mctrl->dma_addr == 0) {
+			//modify by yujianhua for mdss_dsi_isr error 
+			if (ignored) {
+				/* mask out overflow isr */
+				mdss_dsi_set_reg(mctrl, 0x10c,0x0f0000, 0x0f0000);
+				}
+			//modify by yujianhua for mdss_dsi_isr error end
 			MIPI_OUTP(mctrl->ctrl_base + 0x048, ctrl->dma_addr);
 			MIPI_OUTP(mctrl->ctrl_base + 0x04c, len);
 			MIPI_OUTP(mctrl->ctrl_base + 0x090, 0x01); /* trigger */
 		}
 	}
-
+	//modify by yujianhua for mdss_dsi_isr error 
+	if (ignored) {
+		/* mask out overflow isr */
+		mdss_dsi_set_reg(ctrl, 0x10c, 0x0f0000, 0x0f0000);
+		}
+	//modify by yujianhua for mdss_dsi_isr error end
 	/* send cmd to its panel */
 	MIPI_OUTP((ctrl->ctrl_base) + 0x048, ctrl->dma_addr);
 	MIPI_OUTP((ctrl->ctrl_base) + 0x04c, len);
@@ -1540,6 +1570,14 @@ static int mdss_dsi_cmd_dma_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 		ret = tp->len;
 
 	if (mctrl && mctrl->dma_addr) {
+		//modify by yujianhua for mdss_dsi_isr error 
+		if (ignored) {
+			/* clear pending overflow status */
+			mdss_dsi_set_reg(mctrl, 0xc, 0xffffffff, 0x44440000);
+			/* restore overflow isr */
+			mdss_dsi_set_reg(mctrl, 0x10c, 0x0f0000, 0);
+			}
+		//modify by yujianhua for mdss_dsi_isr error end
 		if (ctrl->mdss_util->iommu_attached()) {
 			msm_iommu_unmap_contig_buffer(mctrl->dma_addr,
 			ctrl->mdss_util->get_iommu_domain(domain),
@@ -1554,7 +1592,14 @@ static int mdss_dsi_cmd_dma_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 			ctrl->mdss_util->get_iommu_domain(domain),
 							0, ctrl->dma_size);
 	}
-
+//modify by yujianhua for mdss_dsi_isr error 
+	if (ignored) {
+		/* clear pending overflow status */
+		mdss_dsi_set_reg(ctrl, 0xc, 0xffffffff, 0x44440000);
+		/* restore overflow isr */
+		mdss_dsi_set_reg(ctrl, 0x10c, 0x0f0000, 0);
+		}
+//modify by yujianhua for mdss_dsi_isr error end
 	ctrl->dma_addr = 0;
 	ctrl->dma_size = 0;
 end:
@@ -2167,7 +2212,7 @@ irqreturn_t mdss_dsi_isr(int irq, void *ptr)
 
 	if (isr & DSI_INTR_ERROR) {
 		MDSS_XLOG(ctrl->ndx, ctrl->mdp_busy, isr, 0x97);
-		pr_err("%s: ndx=%d isr=%x\n", __func__, ctrl->ndx, isr);
+		//pr_err("%s: ndx=%d isr=%x\n", __func__, ctrl->ndx, isr);//modify by yujianhua for mdss_dsi_isr error 
 		mdss_dsi_error(ctrl);
 	}
 

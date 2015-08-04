@@ -565,6 +565,8 @@ qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 	if (!cfg->key_code)
 		return 0;
 
+	printk("PowerKey: qpnp_pon_input_dispatch key_code = %d\n",cfg->key_code);
+	
 	/* check the RT status to get the current status of the line */
 	rc = spmi_ext_register_readl(pon->spmi->ctrl, pon->spmi->sid,
 				QPNP_PON_RT_STS(pon->base), &pon_rt_sts, 1);
@@ -1238,6 +1240,12 @@ static int qpnp_pon_config_init(struct qpnp_pon *pon)
 					"Unable to read s2-type\n");
 				return rc;
 			}
+
+            if ((PON_KPDPWR == cfg->pon_type) && (NULL != strstr(saved_command_line, "kpdpwr_warm_reset=1")))
+            {
+                cfg->s2_type = 1;
+            }
+    
 			if (cfg->s2_type > QPNP_PON_RESET_TYPE_MAX) {
 				dev_err(&pon->spmi->dev,
 					"Incorrect reset type specified\n");

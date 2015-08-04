@@ -49,3 +49,10 @@ config GT9XX_TOUCHPANEL_DEBUG
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called gt9xx_update.
+
+config GT9XX_TOUCHPANEL_P839T60
+	tristate "Goodix GT9xx P839T60"
+	depends on TOUCHSCREEN_GT9XX
+	default n
+	help
+	  If unsure, say N.

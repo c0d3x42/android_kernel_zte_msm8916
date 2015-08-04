@@ -121,6 +121,7 @@ struct disp_info_notify {
 	int value;
 	int is_suspend;
 	int ref_count;
+	bool init_done;
 };
 
 struct msm_sync_pt_data {
@@ -236,6 +237,9 @@ struct msm_fb_data_type {
 	int ext_ad_ctrl;
 	u32 ext_bl_ctrl;
 	u32 calib_mode;
+	//add by lixuetao for AD
+	u32 calib_mode_bl;
+	
 	u32 ad_bl_level;
 	u32 bl_level;
 	u32 bl_scale;

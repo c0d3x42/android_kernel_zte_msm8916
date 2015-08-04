@@ -1085,6 +1085,7 @@ static void *def_msm8x16_wcd_mbhc_cal(void)
 	 * all btn_low corresponds to threshold for current source
 	 * all bt_high corresponds to threshold for Micbias
 	 */
+
 	btn_low[0] = 25;
 	btn_high[0] = 25;
 	btn_low[1] = 50;
@@ -1095,6 +1096,19 @@ static void *def_msm8x16_wcd_mbhc_cal(void)
 	btn_high[3] = 112;
 	btn_low[4] = 137;
 	btn_high[4] = 137;
+
+ #ifdef CONFIG_ZTE_MULTI_BUTTON
+       btn_low[0] = 87;
+	btn_high[0] = 100;
+	btn_low[1] = 212.5;
+	btn_high[1] = 262.5;
+	btn_low[2] = 350;
+	btn_high[2] = 400;
+	btn_low[3] = 450;
+	btn_high[3] = 562.5;
+	btn_low[4] = 550;
+	btn_high[4] = 725;
+#endif
 
 	return msm8x16_wcd_cal;
 }

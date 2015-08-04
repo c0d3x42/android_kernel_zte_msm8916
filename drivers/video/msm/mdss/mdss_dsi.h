@@ -319,6 +319,15 @@ struct mdss_dsi_ctrl_pdata {
 	struct clk *shadow_byte_clk;
 	struct clk *shadow_pixel_clk;
 	struct clk *vco_clk;
+   //zhangjian add for 8939 LCD
+	#ifdef CONFIG_ZTE_LCD_P8939
+       int disp_vdddc_en_gpio;
+	int disp_vddio_en_gpio;
+       int disp_debug_mode_en_gpio;
+       int disp_vsp_gpio;
+	int disp_vsn_gpio;
+	#endif
+	//zhangjian add end
 	u8 ctrl_state;
 	int panel_mode;
 	int irq_cnt;
@@ -403,7 +412,9 @@ struct dsi_status_data {
 	struct delayed_work check_status;
 	struct msm_fb_data_type *mfd;
 };
-
+//zhangjian add for 8939 LCD
+int mdss_dsi_panel_power_enable(struct mdss_panel_data *pdata, int enable);
+//add end 
 int dsi_panel_device_register(struct device_node *pan_node,
 				struct mdss_dsi_ctrl_pdata *ctrl_pdata);
 

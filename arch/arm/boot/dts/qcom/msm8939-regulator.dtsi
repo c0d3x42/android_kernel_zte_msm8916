@@ -54,7 +54,7 @@
 		regulator-name = "spk_vreg";
 		startup-delay-us = <0>;
 		enable-active-high;
-		gpio = <&msm_gpio 121 0>;
+		//gpio = <&msm_gpio 121 0>;//zte weiguohua delete it for hifi chip reset gpio,20141201
 	};
 
 	mem_acc_vreg_corner: regulator@1942130 {
@@ -87,6 +87,11 @@
 		qcom,cpr-voltage-ceiling = <1050000 1150000 1350000>;
 		qcom,cpr-voltage-floor = <1050000 1050000 1137500>;
 		vdd-apc-supply = <&ncp6335d>;
+		vdd-apc-optional-prim-supply = <&fan53555>;
+		qcom,cpr-fan53555-apc-volt-step = <12500>;
+		qcom,cpr-fan53555-step-quotient = <26>;
+		qcom,cpr-fan53555-up-threshold = <2>;
+		qcom,cpr-fan53555-down-threshold = <3>;
 
 		qcom,vdd-mx-corner-map = <4 5 7>;
 		qcom,vdd-mx-vmin-method = <4>;

@@ -58,7 +58,8 @@
 #define CHG_INHIBIT_300MV_VAL		0xC0
 
 #define CFG_5_REG			0x05
-#define RECHARGE_200MV_BIT		BIT(2)
+//#define RECHARGE_200MV_BIT		BIT(2)
+#define RECHARGE_100MV_BIT		BIT(2)  //changed by lilei for RECHARGE 100MV 2014.10.28
 #define USB_2_3_BIT			BIT(5)
 
 #define CFG_A_REG			0x0A
@@ -68,6 +69,7 @@
 #define USBIN_INPUT_MASK		SMB135X_MASK(4, 0)
 
 #define CFG_D_REG			0x0D
+#define USBIN_INPUT_COLLAPSE  BIT(0)  //added by lilei  
 
 #define CFG_E_REG			0x0E
 #define POLARITY_100_500_BIT		BIT(2)
@@ -75,6 +77,9 @@
 
 #define CFG_11_REG			0x11
 #define PRIORITY_BIT			BIT(7)
+
+#define CFG_12_REG  0X12
+#define NOT_USED    BIT(5)  //added for can't detect usb remove
 
 #define USBIN_DCIN_CFG_REG		0x12
 #define USBIN_SUSPEND_VIA_COMMAND_BIT	BIT(6)
@@ -104,6 +109,10 @@
 #define CFG_1A_REG			0x1A
 #define HOT_SOFT_VFLOAT_COMP_EN_BIT	BIT(3)
 #define COLD_SOFT_VFLOAT_COMP_EN_BIT	BIT(2)
+
+//added by lilei for setting fast charging input current 
+#define CFG_1C_REG			0x1C
+#define USBIN_INPUT_CURRENT_MASK		SMB135X_MASK(4, 0)
 
 #define VFLOAT_REG			0x1E
 
@@ -191,6 +200,11 @@
 #define RID_A_BIT			BIT(2)
 #define RID_B_BIT			BIT(1)
 #define RID_C_BIT			BIT(0)
+
+//added by lilei  for high voltage 2014.10.21
+#define STATUS_7_REG			0x4d
+#define HVDCP_SEL_9V			BIT(1)
+#define IDEV_HVDCP_SEL_A			BIT(4)
 
 #define STATUS_8_REG			0x4E
 #define USBIN_9V			BIT(5)
@@ -639,6 +653,9 @@ static enum power_supply_property smb135x_battery_properties[] = {
 	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_SYSTEM_TEMP_LEVEL,
+	POWER_SUPPLY_PROP_VOLTAGE_NOW,
+	POWER_SUPPLY_PROP_TEMP,
+	POWER_SUPPLY_PROP_CURRENT_MAX,
 };
 
 static int smb135x_get_prop_batt_status(struct smb135x_chg *chip)
@@ -1123,9 +1140,13 @@ static int smb135x_set_high_usb_chg_current(struct smb135x_chg *chip,
 		return rc;
 	}
 
-	usb_cur_val = i & USBIN_INPUT_MASK;
-	rc = smb135x_masked_write(chip, CFG_C_REG,
-				USBIN_INPUT_MASK, usb_cur_val);
+	//usb_cur_val = i & USBIN_INPUT_MASK;
+	usb_cur_val = i & USBIN_INPUT_CURRENT_MASK;
+	pr_debug("i= 0x%x, usb_cur_val= 0x%x\n",i,usb_cur_val);
+	//rc = smb135x_masked_write(chip, CFG_C_REG,   
+		//			USBIN_INPUT_MASK, usb_cur_val);
+	rc = smb135x_masked_write(chip, CFG_1C_REG,   //changed by lilei for setting fast charging current
+					USBIN_INPUT_CURRENT_MASK, usb_cur_val);
 	if (rc < 0) {
 		dev_err(chip->dev, "cannot write to config c rc = %d\n", rc);
 		return rc;
@@ -1517,6 +1538,8 @@ static int smb135x_battery_is_writeable(struct power_supply *psy,
 	return rc;
 }
 
+extern int pmic_get_prop_battery_voltage_now(void);
+extern int pmic_get_prop_batt_temp(void);
 static int smb135x_battery_get_property(struct power_supply *psy,
 				       enum power_supply_property prop,
 				       union power_supply_propval *val)
@@ -1548,6 +1571,15 @@ static int smb135x_battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_SYSTEM_TEMP_LEVEL:
 		val->intval = chip->therm_lvl_sel;
+		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+		val->intval = pmic_get_prop_battery_voltage_now();
+		break;
+	case POWER_SUPPLY_PROP_TEMP:
+		val->intval = pmic_get_prop_batt_temp();
+		break;	
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
+		val->intval = chip->usb_psy_ma * 1000;
 		break;
 	default:
 		return -EINVAL;
@@ -1656,9 +1688,11 @@ static int smb135x_set_resume_threshold(struct smb135x_chg *chip,
 	if (resume_delta_mv < 200)
 		reg = 0;
 	else
-		reg = RECHARGE_200MV_BIT;
+		//reg = RECHARGE_200MV_BIT;
+		reg = RECHARGE_100MV_BIT; //changed by lilei for recharge 100mv  2014.10.28
 
-	rc = smb135x_masked_write(chip, CFG_5_REG, RECHARGE_200MV_BIT, reg);
+	//rc = smb135x_masked_write(chip, CFG_5_REG, RECHARGE_200MV_BIT, reg);
+	rc = smb135x_masked_write(chip, CFG_5_REG, RECHARGE_100MV_BIT, 0); //changed by lilei for recharge 100mv  2014.10.28
 	if (rc < 0) {
 		dev_err(chip->dev, "Couldn't set recharge  rc = %d\n", rc);
 		return rc;
@@ -1899,12 +1933,16 @@ static int smb135x_parallel_get_property(struct power_supply *psy,
 	return 0;
 }
 
+#define HVDCP_INPUT_CURRENT 2100
 static void smb135x_external_power_changed(struct power_supply *psy)
 {
 	struct smb135x_chg *chip = container_of(psy,
 				struct smb135x_chg, batt_psy);
 	union power_supply_propval prop = {0,};
 	int rc, current_limit = 0;
+	int high_current = 0,cnt = 0; //added by ll 2014.10.24
+	enum power_supply_type usb_supply_type; //added by ll 2014.10.24
+	u8 reg = 0;
 
 	if (!chip->usb_psy)
 		return;
@@ -1921,7 +1959,42 @@ static void smb135x_external_power_changed(struct power_supply *psy)
 	else
 		current_limit = prop.intval / 1000;
 
+    //added by lilei for high voltage adapter 2014.10.21 begin
+	/* usb inserted */
+	rc = smb135x_read(chip, STATUS_5_REG, &reg);
+	if (rc < 0) {
+		dev_err(chip->dev, "Couldn't read status 5 rc = %d\n", rc);
+	}
+	/*
+	 * Report the charger type as UNKNOWN if the
+	 * apsd-fail flag is set. This nofifies the USB driver
+	 * to initiate a s/w based charger type detection.
+	 */
+	if (chip->workaround_flags & WRKARND_APSD_FAIL)
+		reg = 0;
+
+	usb_supply_type = get_usb_supply_type(reg);
+	pr_debug("usb psy type = %d stat_5 = 0x%02x\n",
+			usb_supply_type, reg);
+	
+	if(POWER_SUPPLY_TYPE_USB_DCP == usb_supply_type){//only DCP  try to judge whether if  HVDCP
+		do {
+			msleep(200);
+	rc = smb135x_read(chip, STATUS_7_REG, &reg);
+	if (rc < 0) {
+		pr_err("Couldn't read stat 7 rc = %d\n", rc);
+	}
+
+	if ((reg & HVDCP_SEL_9V ) && (reg & IDEV_HVDCP_SEL_A ))
+				high_current = HVDCP_INPUT_CURRENT;
+			
+		} while(( 0 == high_current) && (cnt++ < 20));
+	}
+
+	pr_debug("STATUS_7_REG = 0x%x,high_current = %d,cnt=%d\n", reg,high_current,cnt);
+	current_limit = max(high_current, current_limit);
 	pr_debug("current_limit = %d\n", current_limit);
+    //added by lilei for high voltage adapter 2014.10.21 end	
 
 	if (chip->usb_psy_ma != current_limit) {
 		mutex_lock(&chip->current_change_lock);
@@ -3346,6 +3419,16 @@ static int smb135x_hw_init(struct smb135x_chg *chip)
 		return rc;
 	}
 
+    //adde by lilei 2014.10.28  enable AUTO_RECHARGE_BIT begin
+	rc = smb135x_masked_write(chip, CFG_14_REG,
+			 DISABLE_AUTO_RECHARGE_BIT, DISABLE_AUTO_RECHARGE_BIT);
+	if (rc < 0) {
+		dev_err(chip->dev, "Couldn't set cfg 14 rc=%d\n", rc);
+		return rc;
+	}
+    //adde by lilei 2014.10.28  disable AUTO_RECHARGE_BIT begin
+
+	
 	/* control USB suspend via command bits */
 	rc = smb135x_masked_write(chip, USBIN_DCIN_CFG_REG,
 		USBIN_SUSPEND_VIA_COMMAND_BIT, USBIN_SUSPEND_VIA_COMMAND_BIT);
@@ -3525,6 +3608,14 @@ static int smb135x_hw_init(struct smb135x_chg *chip)
 		}
 	}
 
+    mask = BIT(5)|BIT(6);
+	rc = smb135x_masked_write(chip, CFG_1A_REG, mask, 0);
+	if (rc < 0) {
+		dev_err(chip->dev, "Couldn't disable soft vfloat rc = %d\n",
+				rc);
+		return rc;
+	}
+	
 	/*
 	 * Command mode for OTG control. This gives us RID interrupts but keeps
 	 * enabling the 5V OTG via i2c register control
@@ -3537,6 +3628,22 @@ static int smb135x_hw_init(struct smb135x_chg *chip)
 		return rc;
 	}
 
+//added by lilei for can't be detected  AC adapter remove begin 2014.10.22
+    rc = smb135x_masked_write(chip,CFG_D_REG,USBIN_INPUT_COLLAPSE,USBIN_INPUT_COLLAPSE);
+	if (rc < 0) {
+		dev_err(chip->dev, "Couldn't write to cfg 0xd reg rc = %d\n",
+				rc);
+		return rc;
+	}
+
+    rc = smb135x_masked_write(chip,CFG_12_REG,NOT_USED,NOT_USED);
+	if (rc < 0) {
+		dev_err(chip->dev, "Couldn't write to cfg 0x12 reg rc = %d\n",
+				rc);
+		return rc;
+	}
+	//added by lilei for can't be detected	AC adapter remove 2014.10.22
+	
 	return rc;
 }
 
@@ -3799,6 +3906,7 @@ static int smb135x_main_charger_probe(struct i2c_client *client,
 	struct power_supply *usb_psy;
 	u8 reg = 0;
 
+       pr_err("+++smb135x_main_charger_probe()\n");
 	chip = devm_kzalloc(&client->dev, sizeof(*chip), GFP_KERNEL);
 	if (!chip) {
 		dev_err(&client->dev, "Unable to allocate memory\n");
@@ -4017,6 +4125,7 @@ static int smb135x_parallel_charger_probe(struct i2c_client *client,
 static int smb135x_charger_probe(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
+       pr_err("+++smb135x_charger_probe()\n");
 	if (is_parallel_charger(client))
 		return smb135x_parallel_charger_probe(client, id);
 	else

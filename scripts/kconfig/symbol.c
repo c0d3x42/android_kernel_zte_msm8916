@@ -1063,7 +1063,8 @@ static void sym_check_print_recursive(struct symbol *last_sym)
 			}
 		}
 		if (stack->sym == last_sym)
-			fprintf(stderr, "%s:%d:error: recursive dependency detected!\n",
+		    //ZWS modify error->warning for compile error
+			fprintf(stderr, "%s:%d:warning: recursive dependency detected!\n",
 				prop->file->name, prop->lineno);
 		if (stack->expr) {
 			fprintf(stderr, "%s:%d:\tsymbol %s %s value contains %s\n",

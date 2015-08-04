@@ -1759,13 +1759,13 @@ static int akm_pinctrl_init(struct akm_compass_data *akm)
 		return PTR_ERR(akm->pinctrl);
 	}
 
-	akm->pin_default = pinctrl_lookup_state(akm->pinctrl, "default");
+	akm->pin_default = pinctrl_lookup_state(akm->pinctrl, "ak09911_default");
 	if (IS_ERR_OR_NULL(akm->pin_default)) {
 		dev_err(&client->dev, "Failed to look up default state\n");
 		return PTR_ERR(akm->pin_default);
 	}
 
-	akm->pin_sleep = pinctrl_lookup_state(akm->pinctrl, "sleep");
+	akm->pin_sleep = pinctrl_lookup_state(akm->pinctrl, "ak09911_sleep");
 	if (IS_ERR_OR_NULL(akm->pin_sleep)) {
 		dev_err(&client->dev, "Failed to look up sleep state\n");
 		return PTR_ERR(akm->pin_sleep);
@@ -2139,7 +2139,7 @@ static const struct dev_pm_ops akm_compass_pm_ops = {
 };
 
 static struct of_device_id akm09911_match_table[] = {
-	{ .compatible = "ak,ak09911", },
+	{ .compatible = "akm,ak09911", },
 	{ .compatible = "akm,akm09911", },
 	{ },
 };

@@ -539,6 +539,9 @@ static int set_reg(void *data, u64 val)
 }
 DEFINE_SIMPLE_ATTRIBUTE(poke_poke_debug_ops, get_reg, set_reg, "0x%02llx\n");
 
+bool ext_apc_buck_is_fan53555 = false;
+EXPORT_SYMBOL(ext_apc_buck_is_fan53555);
+
 static int fan53555_regulator_probe(struct i2c_client *client,
 				const struct i2c_device_id *id)
 {
@@ -577,6 +580,8 @@ static int fan53555_regulator_probe(struct i2c_client *client,
 	if (ret < 0) {
 		dev_err(&client->dev, "Failed to get chip ID!\n");
 		return -ENODEV;
+	} else {
+		ext_apc_buck_is_fan53555 = true;
 	}
 	di->chip_id = val & DIE_ID;
 	/* Get chip revision */

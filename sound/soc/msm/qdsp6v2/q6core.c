@@ -447,7 +447,8 @@ uint32_t core_set_dolby_manufacturer_id(int manufacturer_id)
 {
 	struct adsp_dolby_manufacturer_id payload;
 	int rc = 0;
-	pr_debug("%s: manufacturer_id :%d\n", __func__, manufacturer_id);
+	manufacturer_id = -1227697423;//modified by liyang for dolby
+	pr_err("%s: manufacturer_id :%d\n", __func__, manufacturer_id);
 	mutex_lock(&(q6core_lcl.cmd_lock));
 	ocm_core_open();
 	if (q6core_lcl.core_handle_q) {

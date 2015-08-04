@@ -830,5 +830,34 @@ config SENSORS_BMI058
 	 If you say yes here, you get support for Bosch Sensortec's
 	 sensor driver of BMI058.
 
+# add sensor hub begin
+config INPUT_CWSTM32
+	tristate "CyWee CWSTM32 Sensor HUB"
+	depends on I2C && INPUT
+	select INPUT_POLLDEV
+	default n
+	help
+	  This driver provides support for CWSTM32 Sensor HUB.
+# add sensor hub end	  
+
+# add ALS sensor begin by jiangchong,2014\12\30	  
+config INPUT_LTR559
+	tristate "LTR559 light/proximity sensor support"
+	depends on I2C
+	default n
+	help
+	  Driver for LTR559 light/proximity sensor.
+# add ALS sensor end by jiangchong,2014\12\30
+
+# add start by jiangchong for Hall sensor driver,20150127
+config SENSORS_HALL_AH1898
+	tristate "HALL sensor for ah1898"
+	default n
+	help
+	  This driver provides support for the AH1898 HALL sensor 
+	  The sensor report a gpio interrupt for input system. The sensor is for 
+	  /sys/bus/platform/ah1898.	 
+# add end by jiangchong for Hall sensor driver,20150127
+
 endif
 

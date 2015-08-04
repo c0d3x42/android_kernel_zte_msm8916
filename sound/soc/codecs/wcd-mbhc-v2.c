@@ -55,6 +55,17 @@
 #define FW_READ_TIMEOUT 4000000
 
 static int det_extn_cable_en;
+
+#ifdef   CONFIG_ZTE_HEADSET_GPIO
+struct headset_gpio_pinctrl_info {
+	struct pinctrl *pinctrl;
+	struct pinctrl_state *headset_gpio_det_sus;
+	struct pinctrl_state *headset_gpio_det_act;
+};
+
+static struct headset_gpio_pinctrl_info pinctrl_info_headset_gpio;
+#endif
+
 module_param(det_extn_cable_en, int,
 		S_IRUGO | S_IWUSR | S_IWGRP);
 MODULE_PARM_DESC(det_extn_cable_en, "enable/disable extn cable detect");
@@ -98,20 +109,20 @@ static void wcd_configure_cap(struct wcd_mbhc *mbhc, bool micbias2)
 			(mbhc->micbias2_cap_mode == MICBIAS_EXT_BYP_CAP))
 			snd_soc_update_bits(codec,
 				MSM8X16_WCD_A_ANALOG_MICB_1_EN,
-				0x40, (MICBIAS_EXT_BYP_CAP << 6));
+				0x40, 0x40);
 		else
 			snd_soc_update_bits(codec,
 				MSM8X16_WCD_A_ANALOG_MICB_1_EN,
-				0x40, (MICBIAS_NO_EXT_BYP_CAP << 6));
+				0x40, 0x40);
 	} else if (micbias2) {
 		snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_MICB_1_EN,
-				0x40, (mbhc->micbias2_cap_mode << 6));
+				0x40, 0x40);
 	} else if (micbias1 & 0x80) {
 		snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_MICB_1_EN,
-				0x40, (mbhc->micbias1_cap_mode << 6));
+				0x40, 0x40);//liyang
 	} else {
 		snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_MICB_1_EN,
-				0x40, 0x00);
+				0x40, 0x40);//liyang
 	}
 }
 
@@ -208,6 +219,7 @@ static void wcd_program_btn_threshold(const struct wcd_mbhc *mbhc, bool micbias)
 				__func__, course, fine, reg_addr, reg_val);
 		reg_addr++;
 	}
+
 }
 
 static void wcd_enable_curr_micbias(const struct wcd_mbhc *mbhc,
@@ -1988,6 +2000,10 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 	int ret = 0;
 	int hph_swh = 0;
 	int gnd_swh = 0;
+#ifdef   CONFIG_ZTE_HEADSET_GPIO
+       int gpio_hifi;
+       struct pinctrl *pinctrl;
+#endif  
 	struct snd_soc_card *card = codec->card;
 	const char *hph_switch = "qcom,msm-mbhc-hphl-swh";
 	const char *gnd_switch = "qcom,msm-mbhc-gnd-swh";
@@ -1996,6 +2012,137 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 
 	pr_debug("%s: enter\n", __func__);
 
+#ifdef   CONFIG_ZTE_HEADSET_GPIO
+	gpio_hifi = of_get_named_gpio(card->dev->of_node,
+       					"qcom,headset_detect_irq", 0);
+	if (gpio_hifi < 0) {
+		pr_err("property %s in node %s not found %d\n",
+			"qcom,headset_gpio_detect", card->dev->of_node->full_name,
+			gpio_hifi);
+	}
+    else {
+		if (!gpio_is_valid(gpio_hifi)) {
+			pr_err("%s: Invalid gpio: %d", __func__,
+						gpio_hifi);
+			return -EINVAL;
+		}
+		else{
+			pr_err("%s:zte get heaset  gpio: %d", __func__,
+						gpio_hifi);			   
+		}
+		//gpio_free(pdata->headset_gpio_detect);
+		ret = gpio_request(gpio_hifi, "headset_zte_gpio");
+		if(ret) {
+		pr_err("gpio request failed");
+                 gpio_free(gpio_hifi);
+             }
+		else{
+		gpio_direction_input(gpio_hifi);	
+
+		pr_err( "headset gpio request success");	
+
+             gpio_export(gpio_hifi,0);
+		
+		}
+   
+   		pinctrl = devm_pinctrl_get(card->dev);
+		if (IS_ERR(pinctrl)) {
+			pr_err("%s: Unable to get pinctrl handle\n", __func__);
+			return -EINVAL;
+		}
+		pinctrl_info_headset_gpio.pinctrl = pinctrl;
+		/* get pinctrl handle for cross det pin*/
+		pinctrl_info_headset_gpio.headset_gpio_det_sus = pinctrl_lookup_state(pinctrl,
+							"headset_gpio_det_sus");
+		if (IS_ERR(pinctrl_info_headset_gpio.headset_gpio_det_sus)) {
+			pr_err("%s: Unable to get headset pinctrl disable handle\n",
+								  __func__);
+			return -EINVAL;
+		}
+		pinctrl_info_headset_gpio.headset_gpio_det_act = pinctrl_lookup_state(pinctrl,
+							"headset_gpio_det_act");
+		if (IS_ERR(pinctrl_info_headset_gpio.headset_gpio_det_act)) {
+			pr_err("%s: Unable to get headset pinctrl active handle\n",
+								 __func__);
+			return -EINVAL;
+		}	
+
+	    ret = pinctrl_select_state(pinctrl_info_headset_gpio.pinctrl,
+				pinctrl_info_headset_gpio.headset_gpio_det_act);
+	    if (ret < 0) {
+		pr_err("failed to configure the gpio\n");
+		return ret;
+	    }		
+          else{
+                pr_err("%s: zte success set the pinctl", __func__);	
+           }	  
+
+   }
+
+	gpio_hifi = of_get_named_gpio(card->dev->of_node,
+					"qcom,hph_switch", 0);
+	if (gpio_hifi < 0) {
+		pr_err("property %s in node %s not found %d\n",
+			"hph_switch", card->dev->of_node->full_name,
+			gpio_hifi);
+	}
+    else {
+		if (!gpio_is_valid(gpio_hifi)) {
+			pr_err("%s: Invalid gpio: %d", __func__,
+						gpio_hifi);
+			return -EINVAL;
+		}
+		else{
+			pr_err("%s:zte get hph_switch  gpio: %d", __func__,
+						gpio_hifi);			   
+		}
+		//gpio_free(pdata->headset_gpio_detect);
+		ret = gpio_request(gpio_hifi, "zte_hph_switch");
+		if(ret) {
+		pr_err("gpio request failed");
+                 gpio_free(gpio_hifi);
+             }
+		else{
+		gpio_direction_output(gpio_hifi, 0);//switch to PMIC default//LIYANG
+		pr_err( "zte_hph_switch gpio request success\n");	
+
+             gpio_export(gpio_hifi,0);
+			 	
+		}
+    }
+
+	gpio_hifi = of_get_named_gpio(card->dev->of_node,
+					"qcom,ak_hifi", 0);
+	if (gpio_hifi < 0) {
+		pr_err("property %s in node %s not found %d\n",
+			"hph_switch", card->dev->of_node->full_name,
+			gpio_hifi);
+	}
+    else {
+		if (!gpio_is_valid(gpio_hifi)) {
+			pr_err("%s: Invalid gpio: %d", __func__,
+						gpio_hifi);
+			return -EINVAL;
+		}
+		else{
+			pr_err("%s:zte get hph_switch  gpio: %d", __func__,
+						gpio_hifi);			   
+		}
+		//gpio_free(pdata->headset_gpio_detect);
+		ret = gpio_request(gpio_hifi, "zte_hph_switch");
+		if(ret) {
+		pr_err("gpio request failed");
+                 gpio_free(gpio_hifi);
+             }
+		else{
+		gpio_direction_output(gpio_hifi, 1);//switch to PMIC default//LIYANG
+		pr_err( "ak hifi gpio request success\n");	
+
+             gpio_export(gpio_hifi,0);
+			 	
+		}
+    }
+#endif
 	ret = of_property_read_u32(card->dev->of_node, hph_switch, &hph_swh);
 	if (ret) {
 		dev_err(card->dev,
@@ -2016,6 +2163,9 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 	mbhc->micbias2_cap_mode =
 		(of_property_read_bool(card->dev->of_node, ext2_cap) ?
 		MICBIAS_EXT_BYP_CAP : MICBIAS_NO_EXT_BYP_CAP);
+
+       mbhc->micbias1_cap_mode = MICBIAS_NO_EXT_BYP_CAP;  
+       mbhc->micbias2_cap_mode = MICBIAS_NO_EXT_BYP_CAP;
 
 	mbhc->in_swch_irq_handler = false;
 	mbhc->current_plug = MBHC_PLUG_TYPE_NONE;

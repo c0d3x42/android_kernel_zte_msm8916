@@ -654,7 +654,7 @@ static const struct usb_device_id	products [] = {
  * because of bugs/quirks in a given product (like Zaurus, above).
  */
 {
-	/* ZTE (Vodafone) K3805-Z */
+	
 	.match_flags    =   USB_DEVICE_ID_MATCH_VENDOR
 		 | USB_DEVICE_ID_MATCH_PRODUCT
 		 | USB_DEVICE_ID_MATCH_INT_INFO,
@@ -665,7 +665,7 @@ static const struct usb_device_id	products [] = {
 	.bInterfaceProtocol	= USB_CDC_PROTO_NONE,
 	.driver_info = (unsigned long)&wwan_info,
 }, {
-	/* ZTE (Vodafone) K3806-Z */
+	
 	.match_flags    =   USB_DEVICE_ID_MATCH_VENDOR
 		 | USB_DEVICE_ID_MATCH_PRODUCT
 		 | USB_DEVICE_ID_MATCH_INT_INFO,
@@ -676,7 +676,7 @@ static const struct usb_device_id	products [] = {
 	.bInterfaceProtocol	= USB_CDC_PROTO_NONE,
 	.driver_info = (unsigned long)&wwan_info,
 }, {
-	/* ZTE (Vodafone) K4510-Z */
+	
 	.match_flags    =   USB_DEVICE_ID_MATCH_VENDOR
 		 | USB_DEVICE_ID_MATCH_PRODUCT
 		 | USB_DEVICE_ID_MATCH_INT_INFO,
@@ -687,7 +687,7 @@ static const struct usb_device_id	products [] = {
 	.bInterfaceProtocol	= USB_CDC_PROTO_NONE,
 	.driver_info = (unsigned long)&wwan_info,
 }, {
-	/* ZTE (Vodafone) K3770-Z */
+	
 	.match_flags    =   USB_DEVICE_ID_MATCH_VENDOR
 		 | USB_DEVICE_ID_MATCH_PRODUCT
 		 | USB_DEVICE_ID_MATCH_INT_INFO,
@@ -698,7 +698,7 @@ static const struct usb_device_id	products [] = {
 	.bInterfaceProtocol	= USB_CDC_PROTO_NONE,
 	.driver_info = (unsigned long)&wwan_info,
 }, {
-	/* ZTE (Vodafone) K3772-Z */
+	
 	.match_flags    =   USB_DEVICE_ID_MATCH_VENDOR
 		 | USB_DEVICE_ID_MATCH_PRODUCT
 		 | USB_DEVICE_ID_MATCH_INT_INFO,

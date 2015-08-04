@@ -3674,6 +3674,7 @@ EXPORT_SYMBOL(mmc_cache_ctrl);
 int mmc_suspend_host(struct mmc_host *host)
 {
 	int err = 0;
+	struct mmc_card *card = host->card;
 	ktime_t start = ktime_get();
 
 	if (mmc_bus_needs_resume(host))
@@ -3732,6 +3733,15 @@ int mmc_suspend_host(struct mmc_host *host)
 	}
 	mmc_bus_put(host);
 
+	if (card != NULL && card->cid.manfid == 0x90)
+	{
+		pr_warning("%s: hynix eMMC detected , keep power to eMMC during sleep\n",
+			       mmc_hostname(host));
+		host->pm_flags |= MMC_PM_KEEP_POWER;
+		/*This gates the clock by setting it to 0 Hz, Otherwise the device can not enter the suspend state*/		
+		mmc_gate_clock(host);
+	}
+
 	if (!err && !mmc_card_keep_power(host)) {
 		mmc_claim_host(host);
 		mmc_power_off(host);
@@ -3758,6 +3768,7 @@ int mmc_resume_host(struct mmc_host *host)
 {
 	int err = 0;
 	ktime_t start = ktime_get();
+	struct mmc_card *card = host->card;
 
 	mmc_bus_get(host);
 	if (mmc_bus_manual_resume(host)) {
@@ -3785,6 +3796,15 @@ int mmc_resume_host(struct mmc_host *host)
 				pm_runtime_enable(&host->card->dev);
 			}
 		}
+
+		if (card != NULL && card->cid.manfid == 0x90)
+		{
+			pr_warning("%s: hynix eMMC detected , restores clock\n",
+				       mmc_hostname(host));
+			/*This reverse the gate operation in mmc_suspend_host*/		
+			mmc_ungate_clock(host);
+		}
+		
 		BUG_ON(!host->bus_ops->resume);
 		err = host->bus_ops->resume(host);
 		if (err) {

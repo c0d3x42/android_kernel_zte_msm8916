@@ -290,6 +290,8 @@ struct cpr_regulator {
 	bool		is_cpr_suspended;
 };
 
+extern bool ext_apc_buck_is_fan53555;
+
 #define CPR_DEBUG_MASK_IRQ	BIT(0)
 #define CPR_DEBUG_MASK_API	BIT(1)
 
@@ -1528,8 +1530,14 @@ static int cpr_pvs_init(struct platform_device *pdev,
 	size_t buflen;
 	char *buf;
 
-	rc = of_property_read_u32(of_node, "qcom,cpr-apc-volt-step",
-					&cpr_vreg->step_volt);
+	if (ext_apc_buck_is_fan53555)
+		rc = of_property_read_u32(of_node,
+		"qcom,cpr-fan53555-apc-volt-step",
+		&cpr_vreg->step_volt);
+	else
+		rc = of_property_read_u32(of_node,
+		"qcom,cpr-apc-volt-step",
+		&cpr_vreg->step_volt);
 	if (rc < 0) {
 		cpr_err(cpr_vreg, "read cpr-apc-volt-step failed, rc = %d\n",
 			rc);
@@ -3229,8 +3237,14 @@ static int cpr_init_step_quotient(struct platform_device *pdev,
 
 	if (len == sizeof(u32)) {
 		/* Single step quotient used for all ring oscillators. */
-		rc = of_property_read_u32(of_node, "qcom,cpr-step-quotient",
-					step_quot);
+		if (ext_apc_buck_is_fan53555)
+			rc = of_property_read_u32(of_node,
+			"qcom,cpr-fan53555-step-quotient",
+			step_quot);
+		else
+			rc = of_property_read_u32(of_node,
+			"qcom,cpr-step-quotient",
+			step_quot);
 		if (rc) {
 			cpr_err(cpr_vreg, "could not read qcom,cpr-step-quotient, rc=%d\n",
 				rc);
@@ -3298,10 +3312,19 @@ static int cpr_init_cpr_parameters(struct platform_device *pdev,
 	if (rc)
 		return rc;
 
+	if (ext_apc_buck_is_fan53555)
+		CPR_PROP_READ_U32(cpr_vreg, of_node, "cpr-fan53555-up-threshold",
+		&cpr_vreg->up_threshold, rc);
+	else
 	CPR_PROP_READ_U32(cpr_vreg, of_node, "cpr-up-threshold",
 			  &cpr_vreg->up_threshold, rc);
 	if (rc)
 		return rc;
+
+	if (ext_apc_buck_is_fan53555)
+		CPR_PROP_READ_U32(cpr_vreg, of_node, "cpr-fan53555-down-threshold",
+		&cpr_vreg->down_threshold, rc);
+	else
 	CPR_PROP_READ_U32(cpr_vreg, of_node, "cpr-down-threshold",
 			  &cpr_vreg->down_threshold, rc);
 	if (rc)

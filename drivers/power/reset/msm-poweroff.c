@@ -258,6 +258,12 @@ static void msm_restart_prepare(const char *cmd)
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_RECOVERY);
 			__raw_writel(0x77665502, restart_reason);
+
+              
+              } else if (!strncmp(cmd, "ftmmode", 7)) {
+                    __raw_writel(0x53000000, restart_reason);
+              
+              
 		} else if (!strcmp(cmd, "rtc")) {
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_RTC);

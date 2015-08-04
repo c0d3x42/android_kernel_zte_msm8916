@@ -620,6 +620,15 @@ config QCOM_LIQUID_DOCK
 	  the docking station of various models of Qualcomm Technology's
 	  LiQUID Mobile Development Platforms.
 
+config TPS65132_LCM_VSP
+	tristate "tps65132 controller support"
+	depends on I2C
+	default n
+	help
+	  The tps65132 is a lcm vsp and vsn voltage controller chip.
+	  To compile this driver as a module, choose M here: the
+	  module will be called tps65132.
+	  
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"

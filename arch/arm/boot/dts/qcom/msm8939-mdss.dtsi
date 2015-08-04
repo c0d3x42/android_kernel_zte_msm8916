@@ -300,6 +300,10 @@
 		qcom,mdss-fb-map = <&mdss_fb1>;
 	};
 };
-
+#include "dsi-panel-td4291-jdi-720p-video.dtsi"
 #include "dsi-panel-sim-video.dtsi"
 #include "dsi-panel-sim-cmd.dtsi"
+//zte lixuetao add
+#include "dsi-panel-otm1284a-cpt-720p-video-zte.dtsi"
+#include "dsi-panel-otm1285a-tianma-720p-video-zte.dtsi"
+//zte code end
