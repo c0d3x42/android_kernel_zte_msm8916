@@ -41,7 +41,8 @@ dtb-$(CONFIG_ARCH_MSM8909) += msm8909-sim.dtb \
 	msm8909-1gb-mtp.dtb
 dtb-$(CONFIG_ARCH_MSM8916) += msm8939-mtp-smb1360.dtb \
 	msmtellurium-sim.dtb \
-	msmtellurium-rumi.dtb
+	msmtellurium-rumi.dtb \
+	msm8939-v3.0-mtp-smb1360.dtb
 dtb-$(CONFIG_ARCH_MSM8226) += msm8226-sim.dtb \
 	msm8226-fluid.dtb \
 	msm8226-v1-cdp.dtb \
