@@ -70,6 +70,10 @@
 #include	<linux/regulator/consumer.h>
 #include	<linux/of_gpio.h>
 #include	<linux/sensors.h>
+//added by chenhui for proc info node begin
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+//added by chenhui for proc info node
 
 #define	DEBUG	1
 
@@ -242,6 +246,27 @@ struct odr_config_table {
 	unsigned int cutoff_ms;
 	unsigned int mask;
 };
+
+/*added by chenhui for proc info node begin*/
+#define PROC_GSENSOR_DIR  "gsensor"
+#define PROC_GSENSOR_NAME  "gsensor/chip_info"
+
+static struct proc_dir_entry *gsensor_proc_dir_entry;
+static struct i2c_client *proc_client;
+//static ssize_t gsensor_config_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos);
+static int gsensor_config_proc_open(struct inode *inode, struct file *file);
+struct list_head nd_struct_glist_s;
+
+
+static const struct file_operations info_proc_file_ops = {	
+	.owner	 = THIS_MODULE,    
+	.open    = gsensor_config_proc_open,    
+	.read	 = seq_read,	
+	.llseek	 = seq_lseek,	
+	.release = seq_release,	
+	//.write   = gsensor_config_proc_write,
+};
+/*proc info node end*/
 
 struct odr_config_table lis3dh_acc_odr_table[] = {
 		{    1, ODR1250 },
@@ -2006,6 +2031,69 @@ static int lis3dh_parse_dt(struct device *dev,
 }
 #endif
 
+
+/*added by chenhui for chip info proc node begin*/
+
+static void *gsensor_config_proc_start(struct seq_file *m, loff_t *pos)
+{	
+	return seq_list_start_head(&nd_struct_glist_s, *pos);
+}
+
+static void *gsensor_config_proc_next(struct seq_file *p, void *v, loff_t *pos)
+{	
+	return seq_list_next(v, &nd_struct_glist_s, pos);
+}
+
+static void gsensor_config_proc_stop(struct seq_file *m, void *v)
+{
+}
+
+static int gsensor_config_proc_show(struct seq_file *m, void *v)
+{
+	int retval;
+	
+	seq_puts(m, "gsensor module\n");
+	
+	seq_printf(m, "chip name : %s\n", LIS3DH_ACC_DEV_NAME);	
+	
+	seq_printf(m, "i2c address  : %d-00%x\n",proc_client->adapter->nr, proc_client->addr);
+	
+	retval = i2c_smbus_read_byte_data(proc_client, WHO_AM_I);
+
+	if (retval < 0) {
+		dev_err(&proc_client->dev, "verify  err!\n");
+		return 0;
+	}
+       seq_printf(m, "chip id : 0x%x\n", retval);
+	   
+	return 0;
+}
+
+
+static const struct seq_operations proc_config_ops = {	
+	.start = gsensor_config_proc_start,	
+	.next  = gsensor_config_proc_next,	
+	.stop  = gsensor_config_proc_stop,	
+	.show  = gsensor_config_proc_show,
+};
+
+static int gsensor_config_proc_open(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &proc_config_ops);
+}
+/*
+static ssize_t gsensor_config_proc_write(struct file *file, const char __user *buffer, size_t count, loff_t *pos)
+{
+
+}
+*/
+static void remove_procfs_interfaces(void)
+{
+	remove_proc_entry(PROC_GSENSOR_NAME, gsensor_proc_dir_entry);
+	remove_proc_entry(PROC_GSENSOR_DIR, NULL);
+}
+/*added by chenhui for chip info proc node end*/
+
 static int lis3dh_acc_probe(struct i2c_client *client,
 		const struct i2c_device_id *id)
 {
@@ -2222,6 +2310,18 @@ static int lis3dh_acc_probe(struct i2c_client *client,
 		dev_err(&client->dev,
 			"Can't select pinctrl sleep state\n");
 
+/*added by chenhui for proc info node begin*/
+	gsensor_proc_dir_entry = proc_mkdir(PROC_GSENSOR_DIR, NULL);	
+
+	if (!gsensor_proc_dir_entry) {           
+		dev_err(&client->dev, "gsensor_proc_dir_entry is null\n");
+	}
+	proc_create(PROC_GSENSOR_NAME, 0644, NULL, &info_proc_file_ops);               
+
+	proc_client = acc->client;
+/*added by chenhui for proc info node end*/
+
+
 	mutex_unlock(&acc->lock);
 
 	dev_dbg(&client->dev, "%s: probed\n", LIS3DH_ACC_DEV_NAME);
@@ -2269,6 +2369,7 @@ static int lis3dh_acc_remove(struct i2c_client *client)
 	lis3dh_acc_input_cleanup(acc);
 	lis3dh_acc_config_regulator(acc, false);
 	remove_sysfs_interfaces(&client->dev);
+	remove_procfs_interfaces();//added by chenhui proc info node
 
 	if (acc->pdata->exit)
 		acc->pdata->exit();

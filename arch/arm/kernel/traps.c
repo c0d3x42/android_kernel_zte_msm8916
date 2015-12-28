@@ -49,11 +49,11 @@ static const char *handler[]= {
 void *vectors_page;
 
 #ifdef CONFIG_DEBUG_USER
-unsigned int user_debug;
+unsigned int user_debug = 0;//modified by zhouxin for removing unhandled page fault print of userspace process in kernel log 
 
 static int __init user_debug_setup(char *str)
 {
-	get_option(&str, &user_debug);
+	////get_option(&str, &user_debug);//modified by zhouxin for removing unhandled page fault print of userspace process in kernel log
 	return 1;
 }
 __setup("user_debug=", user_debug_setup);

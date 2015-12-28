@@ -270,6 +270,12 @@ config SND_SOC_MSM8X16
 	 interfaces with DSP, also it will enable
 	 the machine drivers and the corresponding
 	 DAI-links.
+	 
+config ZTE_MULTI_BUTTON
+	bool "Enable MULTIBUTTON"
+	depends on ARCH_MSM8916
+	help
+     zte config for multibutton
 
 config SND_SOC_MSM8909
 	tristate "SoC Machine driver for MSM8909 boards"

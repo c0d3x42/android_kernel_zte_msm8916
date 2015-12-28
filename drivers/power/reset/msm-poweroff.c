@@ -61,11 +61,17 @@ static void *dload_mode_addr;
 static bool dload_mode_enabled;
 static void *emergency_dload_mode_addr;
 static bool scm_dload_supported;
+//added by zhouxin for kernel reset log in pstore
+static uint32_t is_warm_reset_enable = 0;
+
 
 static int dload_set(const char *val, struct kernel_param *kp);
 static int download_mode = 1;
 module_param_call(download_mode, dload_set, param_get_int,
 			&download_mode, 0644);
+//added by zhouxin for kernel reset log in pstore
+module_param_named(warm_reset_enable, is_warm_reset_enable, uint, S_IRUGO | S_IWUSR);
+
 static int panic_prep_restart(struct notifier_block *this,
 			      unsigned long event, void *ptr)
 {
@@ -227,6 +233,9 @@ static void msm_restart_prepare(const char *cmd)
 			(in_panic || restart_mode == RESTART_DLOAD));
 #endif
 
+	need_warm_reset = (get_dload_mode() ||
+				(cmd != NULL && cmd[0] != '\0' && !strcmp(cmd, "recovery")));
+
 	if (qpnp_pon_check_hard_reset_stored()) {
 		/* Set warm reset as true when device is in dload mode
 		 *  or device doesn't boot up into recovery, bootloader or rtc.
@@ -237,11 +246,12 @@ static void msm_restart_prepare(const char *cmd)
 			strcmp(cmd, "bootloader") &&
 			strcmp(cmd, "rtc")))
 			need_warm_reset = true;
-	} else {
-		need_warm_reset = (get_dload_mode() ||
-				(cmd != NULL && cmd[0] != '\0'));
 	}
 
+        //added by zhouxin for kernel reset log in pstore
+	if(is_warm_reset_enable){
+		need_warm_reset = 1;
+	}
 	/* Hard reset the PMIC unless memory contents must be maintained. */
 	if (need_warm_reset) {
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
@@ -258,6 +268,12 @@ static void msm_restart_prepare(const char *cmd)
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_RECOVERY);
 			__raw_writel(0x77665502, restart_reason);
+
+              /* zte_sw_duanxiaodong add for "adb reboot ftm" command support +*/
+              } else if (!strncmp(cmd, "ftmmode", 7)) {
+                    __raw_writel(0x53000000, restart_reason);
+              /* zte_sw_duanxiaodong add for "adb reboot ftm" command support +*/
+              
 		} else if (!strcmp(cmd, "rtc")) {
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_RTC);

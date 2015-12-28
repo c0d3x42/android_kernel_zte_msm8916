@@ -32,6 +32,7 @@ struct msm_flash_fn_t {
 	int32_t (*flash_led_off)(struct msm_led_flash_ctrl_t *);
 	int32_t (*flash_led_low)(struct msm_led_flash_ctrl_t *);
 	int32_t (*flash_led_high)(struct msm_led_flash_ctrl_t *);
+	int32_t (*flash_led_torch)(struct msm_led_flash_ctrl_t *);
 };
 
 struct msm_led_flash_reg_t {
@@ -40,6 +41,7 @@ struct msm_led_flash_reg_t {
 	struct msm_camera_i2c_reg_setting *release_setting;
 	struct msm_camera_i2c_reg_setting *low_setting;
 	struct msm_camera_i2c_reg_setting *high_setting;
+	struct msm_camera_i2c_reg_setting *torch_setting;
 };
 
 struct msm_led_flash_ctrl_t {

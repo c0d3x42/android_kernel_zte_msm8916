@@ -70,6 +70,9 @@
 #include <linux/tracepoint.h>
 #include <linux/qcom/usb_trace.h>
 
+//zz must include switch.h before include ci13xxx_udc.h !!!
+#include <linux/switch.h>
+//zz
 #include "ci13xxx_udc.h"
 
 /******************************************************************************
@@ -3580,6 +3583,24 @@ static const struct usb_ep_ops usb_ep_ops = {
 	.fifo_flush    = ep_fifo_flush,
 };
 
+//zz
+static void udc_uevent(struct switch_dev *sdev, int state)
+{
+	//struct ci13xxx *udc = container_of(data, struct ci13xxx, event_work);
+	char *online[2] = { "USB_STATE=ONLINE", NULL };
+	char *offline[2] = { "USB_STATE=OFFLINE", NULL };
+	char **uevent_envp = NULL;
+
+	//switch_set_state(&sdev, state);
+	
+	uevent_envp = state? online : offline;
+	
+	if (uevent_envp) {
+		kobject_uevent_env(&sdev->dev->kobj, KOBJ_CHANGE, uevent_envp);
+		pr_info("%s: sent uevent %s\n", __func__, uevent_envp[0]);
+		}
+}
+//zz
 /******************************************************************************
  * GADGET block
  *****************************************************************************/
@@ -3615,6 +3636,9 @@ static int ci13xxx_vbus_session(struct usb_gadget *_gadget, int is_active)
 					CI13XXX_CONTROLLER_DISCONNECT_EVENT);
 			pm_runtime_put_sync(&_gadget->dev);
 		}
+//zz
+		udc_uevent(&udc->scsi_sdev, is_active);
+//zz
 	}
 
 	return 0;
@@ -4034,6 +4058,15 @@ static int udc_probe(struct ci13xxx_udc_driver *driver, struct device *dev,
 			goto put_transceiver;
 	}
 
+//zz        /*xbl-20121128*/
+	udc->scsi_sdev.name = "usb_scsi_command";
+        retval = switch_dev_register(&udc->scsi_sdev);
+        if (retval) {
+                goto put_transceiver;
+        }
+	/*end*/
+//zz
+
 	if (udc->transceiver) {
 		retval = otg_set_peripheral(udc->transceiver->otg,
 						&udc->gadget);
@@ -4063,6 +4096,9 @@ static int udc_probe(struct ci13xxx_udc_driver *driver, struct device *dev,
 	return retval;
 
 del_udc:
+//zz
+	switch_dev_unregister(&udc->scsi_sdev);
+//zz
 	usb_del_gadget_udc(&udc->gadget);
 remove_trans:
 	if (udc->transceiver)

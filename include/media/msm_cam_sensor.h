@@ -547,6 +547,7 @@ struct msm_actuator_cfg_data {
 enum msm_camera_led_config_t {
 	MSM_CAMERA_LED_OFF,
 	MSM_CAMERA_LED_LOW,
+	MSM_CAMERA_LED_TORCH,
 	MSM_CAMERA_LED_HIGH,
 	MSM_CAMERA_LED_INIT,
 	MSM_CAMERA_LED_RELEASE,

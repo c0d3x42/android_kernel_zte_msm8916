@@ -9,6 +9,8 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+#define ZTE_CHARGER_DEBUG
+//#define DEBUG
 #define pr_fmt(fmt) "SMB:%s: " fmt, __func__
 
 #include <linux/i2c.h>
@@ -29,6 +31,19 @@
 #include <linux/bitops.h>
 #include <linux/qpnp/qpnp-adc.h>
 #include <linux/completion.h>
+#include <linux/wakelock.h>
+
+#include <linux/timer.h>
+#include <linux/timex.h>
+#include <linux/rtc.h>
+
+//ZTE-MODIFY by DingXuehua, add for soc sync
+#define FEATURE_SYNC_SOC
+//ZTE-MODIFY by DingXuehua, add for soc sync
+
+//ZTE-MODIFY by DingXuehua, define CHEKC_PCB_HW_VERSION
+#define CHEKC_PCB_HW_VERSION
+//ZTE-MODIFY by DingXuehua, define CHEKC_PCB_HW_VERSION
 
 #define _SMB1360_MASK(BITS, POS) \
 	((unsigned char)(((1 << (BITS)) - 1) << (POS)))
@@ -61,6 +76,7 @@
 #define CHG_EN_BY_PIN_BIT		BIT(7)
 #define CHG_EN_ACTIVE_LOW_BIT		BIT(6)
 #define PRE_TO_FAST_REQ_CMD_BIT		BIT(5)
+#define BAT_OVP_ENDS_CHG_CYCLE_BIT	BIT(4)
 #define CHG_CURR_TERM_DIS_BIT		BIT(3)
 #define CFG_AUTO_RECHG_DIS_BIT		BIT(2)
 #define CFG_CHG_INHIBIT_EN_BIT		BIT(0)
@@ -69,6 +85,8 @@
 #define CHG_RECHG_THRESH_FG_SRC_BIT	BIT(1)
 
 #define CFG_STAT_CTRL_REG		0x09
+//ZTE-MODIFY by DingXuehua
+#define CHG_STAT_LOW_BAT_BLINK_BIT	BIT(5)
 #define CHG_STAT_IRQ_ONLY_BIT		BIT(4)
 #define CHG_TEMP_CHG_ERR_BLINK_BIT	BIT(3)
 #define CHG_STAT_ACTIVE_HIGH_BIT	BIT(1)
@@ -84,6 +102,7 @@
 
 #define CFG_FG_BATT_CTRL_REG		0x0E
 #define CFG_FG_OTP_BACK_UP_ENABLE	BIT(7)
+#define JEITA_TEMP_HARD_LIMIT_BIT	BIT(6)
 #define BATT_ID_ENABLED_BIT		BIT(5)
 #define CHG_BATT_ID_FAIL		BIT(4)
 #define BATT_ID_FAIL_SELECT_PROFILE	BIT(3)
@@ -94,6 +113,8 @@
 #define IRQ_CFG_REG			0x0F
 #define IRQ_BAT_HOT_COLD_HARD_BIT	BIT(7)
 #define IRQ_BAT_HOT_COLD_SOFT_BIT	BIT(6)
+//ZTE-MODIFY by DingXuehua, add IRQ_DCIN_OV_BIT 
+#define IRQ_DCIN_OV_BIT			BIT(3)
 #define IRQ_DCIN_UV_BIT			BIT(2)
 #define IRQ_INTERNAL_TEMPERATURE_BIT	BIT(0)
 
@@ -113,9 +134,23 @@
 #define IRQ3_SOC_EMPTY_BIT		BIT(1)
 #define IRQ3_SOC_FULL_BIT		BIT(0)
 
+//ZTE-MODIFY by DingXuehua, set pre-to-fast charge battery voltage threshold
+#define PRE2FAST_VOLTAGE_REG                0x12
+#define PRE2FAST_VOLTAGE_THRESHOLD_MASK     SMB1360_MASK(7, 5)
+#define PRE2FAST_VOLTAGE_THRESHOLD_SHIFT    5
+#define PRE2FAST_VOLTAGE_2V9                0x4  // 2.9V
+#define PRE2FAST_VOLTAGE_3V1                0x6  // 3.1V
+#define PRE2FAST_VOLTAGE_3V4                0x7  // 3.4V
+#define OTG_UVLO_VOLTAGE_THRESHOLD_MASK     SMB1360_MASK(4, 2)
+#define OTG_UVLO_VOLTAGE_THRESHOLD_SHIFT    2
+#define OTG_UVLO_VOLTAGE_2V86               0x3  // 2.86V
+
 #define CHG_CURRENT_REG			0x13
 #define FASTCHG_CURR_MASK		SMB1360_MASK(4, 2)
 #define FASTCHG_CURR_SHIFT		2
+#define PRECHG_CURR_MASK		SMB1360_MASK(1, 0)
+#define PRECHG_CURR_SHIFT		0
+#define PRECHG_CURR_100MA		0x0
 
 #define CHG_CMP_CFG			0x14
 #define JEITA_COMP_CURR_MASK		SMB1360_MASK(3, 0)
@@ -154,6 +189,7 @@
 
 /* Status Registers */
 #define STATUS_3_REG			0x4B
+#define CHG_DONE_BIT			BIT(5)
 #define CHG_HOLD_OFF_BIT		BIT(3)
 #define CHG_TYPE_MASK			SMB1360_MASK(2, 1)
 #define CHG_TYPE_SHIFT			1
@@ -186,6 +222,8 @@
 #define IRQ_D_REG			0x53
 #define IRQ_E_REG			0x54
 #define IRQ_E_USBIN_UV_BIT		BIT(0)
+//ZTE-MODIFY By DingXuehua, add IRQ_E_USBIN_OV_BIT
+#define IRQ_E_USBIN_OV_BIT		BIT(2)
 
 #define IRQ_F_REG			0x55
 
@@ -270,6 +308,11 @@ enum {
 
 static int otg_curr_ma[] = {350, 550, 950, 1500};
 
+//ZTE-MODIFY By DingXuehua, fix sometimes screen not on after usb removed
+static bool probe_done_flag = false;
+struct wake_lock usbin_valid_irq_wakelock;
+struct wake_lock usb_present_wakelock;
+
 struct smb1360_otg_regulator {
 	struct regulator_desc	rdesc;
 	struct regulator_dev	*rdev;
@@ -307,6 +350,7 @@ struct smb1360_chip {
 	unsigned int			therm_lvl_sel;
 	unsigned int			*thermal_mitigation;
 	int				otg_batt_curr_limit;
+	int				adapter_curr_limit;
 	bool				min_icl_usb100;
 	int				cold_bat_decidegc;
 	int				hot_bat_decidegc;
@@ -318,6 +362,22 @@ struct smb1360_chip {
 	int				warm_bat_ma;
 	int				soft_cold_thresh;
 	int				soft_hot_thresh;
+	//ZTE-MODIFY by DingXuehua, add for led_ctl
+	int				pre_charge_led;
+	//ZTE-MODIFY by DingXuehua, add for soc sync
+	//ZTE-MODIFY by DingXuehua, defined CHEKC_PCB_HW_VERSION
+	#if defined CHEKC_PCB_HW_VERSION
+	int				hw_version_gpio_0;
+	int				hw_version_gpio_1;
+	int				hw_version_gpio_2;
+	#endif
+	//ZTE-MODIFY by DingXuehua, defined CHEKC_PCB_HW_VERSION
+	#if defined FEATURE_SYNC_SOC
+	int				ui_soc;
+	int				fg_soc;
+	bool			charging_done_status;
+	#endif
+	//ZTE-MODIFY by DingXuehua, add for soc sync
 
 	/* configuration data - fg */
 	int				soc_max;
@@ -342,6 +402,12 @@ struct smb1360_chip {
 	int				otg_fet_enable_gpio;
 
 	/* status tracking */
+	/*************************************************************************
+	* Subject: [PATCH] power: smb1360: Report previous values for a prop. 
+	* if device is suspended All i2c calls fail after the device is suspended. 
+	* To avoid returning error-codes, return the previous value 
+	* if a power-supply property is requested after suspend.
+	**************************************************************************/
 	int				voltage_now;
 	int				current_now;
 	int				resistance_now;
@@ -365,6 +431,8 @@ struct smb1360_chip {
 	int				charging_disabled_status;
 	u32				connected_rid;
 	u32				profile_rid[BATTERY_PROFILE_MAX];
+	//ZTE-MODIFY by DingXuehua, choose which profile to load
+	u32				profile_to_load;
 
 	u32				peek_poke_address;
 	u32				fg_access_type;
@@ -383,6 +451,11 @@ struct smb1360_chip {
 	struct mutex			read_write_lock;
 	struct mutex			otp_gain_lock;
 	struct mutex			fg_access_request_lock;
+	//ZTE-MODIFY by DingXuehua, add for soc sync
+	#if 0//defined FEATURE_SYNC_SOC
+	struct delayed_work		update_heartbeat_work;
+	#endif
+	//ZTE-MODIFY by DingXuehua, add for soc sync
 };
 
 static int chg_time[] = {
@@ -421,12 +494,38 @@ static int bound(int val, int min, int max)
 	return val;
 }
 
+/*
+* ZTE modify by wangbin,test code for fail to w/r i2c
+*/
+/*
+#define RETRY_COUNT 5 
+int retry_sleep_ms[RETRY_COUNT] = { 
+10, 20, 30, 40, 50 
+}; 
+*/
+
 static int __smb1360_read(struct smb1360_chip *chip, int reg,
 				u8 *val)
 {
 	s32 ret;
+/*
+	if(!chip->resume_completed){
+		pr_err("i2c while device suspended!!\n");
+		WARN_ON(1);
+	}
 
+	int retry_count = 0;
+
+retry: 
+*/
 	ret = i2c_smbus_read_byte_data(chip->client, reg);
+
+	/*
+	if (ret < 0 && retry_count < RETRY_COUNT) { 
+           msleep(retry_sleep_ms[retry_count++]); 
+           goto retry; 
+	} 
+	*/
 	if (ret < 0) {
 		dev_err(chip->dev,
 			"i2c read fail: can't read from %02x: %d\n", reg, ret);
@@ -443,8 +542,24 @@ static int __smb1360_write(struct smb1360_chip *chip, int reg,
 						u8 val)
 {
 	s32 ret;
+/*
+	if(!chip->resume_completed){
+		pr_err("i2c while device suspended!!\n");
+		WARN_ON(1);
+	}
 
+	int retry_count = 0;
+
+retry: 
+*/
 	ret = i2c_smbus_write_byte_data(chip->client, reg, val);
+
+	/*
+	if (ret < 0 && retry_count < RETRY_COUNT) { 
+          msleep(retry_sleep_ms[retry_count++]); 
+          goto retry; 
+	} 
+	*/
 	if (ret < 0) {
 		dev_err(chip->dev,
 			"i2c write fail: can't write %02x to %02x: %d\n",
@@ -800,6 +915,9 @@ static int smb1360_enable_volatile_writes(struct smb1360_chip *chip)
 #define CHECK_USB100_GOOD_BIT	BIT(6)
 static bool is_usb100_broken(struct smb1360_chip *chip)
 {
+#if 1
+	return true;
+#else
 	int rc;
 	u8 reg;
 
@@ -809,6 +927,7 @@ static bool is_usb100_broken(struct smb1360_chip *chip)
 		return rc;
 	}
 	return !!(reg & CHECK_USB100_GOOD_BIT);
+#endif
 }
 
 static int read_revision(struct smb1360_chip *chip, u8 *revision)
@@ -939,6 +1058,8 @@ static enum power_supply_property smb1360_battery_properties[] = {
 	POWER_SUPPLY_PROP_RESISTANCE,
 	POWER_SUPPLY_PROP_TEMP,
 	POWER_SUPPLY_PROP_SYSTEM_TEMP_LEVEL,
+	//ZTE-MODIFY by DingXuehua, add battery type in Emode
+	POWER_SUPPLY_PROP_TECHNOLOGY,
 };
 
 static int smb1360_get_prop_batt_present(struct smb1360_chip *chip)
@@ -950,30 +1071,47 @@ static int smb1360_get_prop_batt_status(struct smb1360_chip *chip)
 {
 	int rc;
 	u8 reg = 0, chg_type;
+	int power_supply_status = -1;
 
-	if (is_device_suspended(chip))
-		return POWER_SUPPLY_STATUS_UNKNOWN;
+	//if (is_device_suspended(chip))
+	//	return POWER_SUPPLY_STATUS_UNKNOWN;
 
-	if (chip->batt_full)
-		return POWER_SUPPLY_STATUS_FULL;
+	//ZTE-MODIFY By DingXuehua
+	if (!chip->usb_present)
+	{
+		power_supply_status = POWER_SUPPLY_STATUS_NOT_CHARGING;//POWER_SUPPLY_STATUS_DISCHARGING;
+	}
+	else
+	{
+		if (chip->batt_full && (chip->soc_now >= 90))
+		{
+			power_supply_status = POWER_SUPPLY_STATUS_FULL;
+		}
+		else
+		{
 
 	rc = smb1360_read(chip, STATUS_3_REG, &reg);
 	if (rc) {
 		pr_err("Couldn't read STATUS_3_REG rc=%d\n", rc);
-		return POWER_SUPPLY_STATUS_UNKNOWN;
+				power_supply_status = POWER_SUPPLY_STATUS_UNKNOWN;
 	}
 
-	pr_debug("STATUS_3_REG = %x\n", reg);
+			pr_debug("STATUS_3_REG[0x%x] = 0x%x\n",STATUS_3_REG, reg);
 
 	if (reg & CHG_HOLD_OFF_BIT)
-		return POWER_SUPPLY_STATUS_NOT_CHARGING;
+				power_supply_status = POWER_SUPPLY_STATUS_NOT_CHARGING;
 
 	chg_type = (reg & CHG_TYPE_MASK) >> CHG_TYPE_SHIFT;
 
 	if (chg_type == BATT_NOT_CHG_VAL)
-		return POWER_SUPPLY_STATUS_DISCHARGING;
+				power_supply_status = POWER_SUPPLY_STATUS_DISCHARGING;
 	else
-		return POWER_SUPPLY_STATUS_CHARGING;
+				power_supply_status = POWER_SUPPLY_STATUS_CHARGING;
+		}
+	}
+
+	pr_err("Reg0x4B=0x%x, power_supply_status=%d\n",reg,power_supply_status);
+	return power_supply_status;
 }
 
 static int smb1360_get_prop_charging_status(struct smb1360_chip *chip)
@@ -990,14 +1128,28 @@ static int smb1360_get_prop_charging_status(struct smb1360_chip *chip)
 	return (reg & CHG_EN_BIT) ? 1 : 0;
 }
 
+static bool smb1360_get_prop_charging_done_status(struct smb1360_chip *chip)
+{
+	int rc;
+	u8 reg = 0;
+
+	rc = smb1360_read(chip, STATUS_3_REG, &reg);
+	if (rc) {
+		pr_err("Couldn't read STATUS_3_REG rc=%d\n", rc);
+		return 0;
+	}
+
+	return (reg & CHG_DONE_BIT) ? true : false;
+}
+
 static int smb1360_get_prop_charge_type(struct smb1360_chip *chip)
 {
 	int rc;
 	u8 reg = 0;
 	u8 chg_type;
 
-	if (is_device_suspended(chip))
-		return POWER_SUPPLY_CHARGE_TYPE_UNKNOWN;
+	//if (is_device_suspended(chip))
+	//	return POWER_SUPPLY_CHARGE_TYPE_UNKNOWN;
 
 	rc = smb1360_read(chip, STATUS_3_REG, &reg);
 	if (rc) {
@@ -1025,21 +1177,74 @@ static int smb1360_get_prop_batt_health(struct smb1360_chip *chip)
 		ret.intval = POWER_SUPPLY_HEALTH_OVERHEAT;
 	else if (chip->batt_cold)
 		ret.intval = POWER_SUPPLY_HEALTH_COLD;
+	//ZTE-MODIFY by DingXuehua, the status 'warm' or 'cool' is not exist in framework
+	/*
 	else if (chip->batt_warm)
 		ret.intval = POWER_SUPPLY_HEALTH_WARM;
 	else if (chip->batt_cool)
 		ret.intval = POWER_SUPPLY_HEALTH_COOL;
+	*/
 	else
 		ret.intval = POWER_SUPPLY_HEALTH_GOOD;
 
 	return ret.intval;
 }
 
+/* ZTE-MODIFY BY Wangbin for disable usb charging and disable shutdown low battery :begin*/
+static int enable_to_shutdown = 1;
+static struct smb1360_chip *the_chip;
+static int set_enable_to_shutdown(const char *val, struct kernel_param *kp)
+{
+	int ret;
+	struct smb1360_chip *chip = the_chip;
+
+	ret = param_set_int(val, kp);
+	if (ret) {
+		pr_err("error setting value %d\n", ret);
+		return ret;
+	}
+	if (chip) {
+		pr_warn("set_enable_to_shutdown to %d\n", enable_to_shutdown);
+		return 0;
+	}
+	return -EINVAL;
+}
+module_param_call(enable_to_shutdown, set_enable_to_shutdown, param_get_uint,
+					&enable_to_shutdown, 0660);
+
+static int charging_disabled = 0;
+
+static int set_charging_disabled(const char *val, struct kernel_param *kp)
+{
+	int ret;
+	struct smb1360_chip *chip = the_chip;
+
+	ret = param_set_int(val, kp);
+	if (ret) {
+		pr_err("error setting value %d\n", ret);
+		return ret;
+	}
+       if(charging_disabled)
+	   	smb1360_charging_disable(chip,USER,true);
+	   else
+	   	smb1360_charging_disable(chip,USER,false);
+
+	power_supply_changed(&chip->batt_psy);
+	
+	return 0;
+} 
+module_param_call(charging_disabled, set_charging_disabled, param_get_uint,
+					&charging_disabled, 0660);
+/* ZTE-MODIFY BY Wangbin for disable usb charging and disable shutdown low battery:end*/
+
 static int smb1360_get_prop_batt_capacity(struct smb1360_chip *chip)
 {
 	u8 reg;
 	u32 temp = 0;
 	int rc, soc = 0;
+
+	//if (is_device_suspended(chip))
+	//	return chip->soc_now;
 
 	if (chip->fake_battery_soc >= 0)
 		return chip->fake_battery_soc;
@@ -1049,13 +1254,11 @@ static int smb1360_get_prop_batt_capacity(struct smb1360_chip *chip)
 		return 0;
 	}
 
-	if (is_device_suspended(chip))
-		return chip->soc_now;
-
 	rc = smb1360_read(chip, SHDW_FG_MSYS_SOC, &reg);
 	if (rc) {
-		pr_err("Failed to read FG_MSYS_SOC rc=%d\n", rc);
-		return rc;
+		pr_err("Failed to read FG_MSYS_SOC rc=%d, return old value %d\n", rc, chip->soc_now);
+		return chip->soc_now;
+		//return rc;
 	}
 	soc = (100 * reg) / MAX_8_BITS;
 
@@ -1066,29 +1269,123 @@ static int smb1360_get_prop_batt_capacity(struct smb1360_chip *chip)
 	pr_debug("msys_soc_reg=0x%02x, fg_soc=%d batt_full = %d\n", reg,
 						soc, chip->batt_full);
 
-	chip->soc_now = (chip->batt_full ? 100 : bound(soc, 0, 100));
+	/* ZTE-MODIFY BY Wangbin for disable usb charging and disable shutdown low battery: begin*/
+	if (soc == 0) {
+		if (!enable_to_shutdown)
+		{
+			soc = 5;
+		}
+	}
+	/* ZTE-MODIFY BY Wangbin for disable usb charging and disable shutdown low battery: end*/
+	   
+	//ZTE-MODIFY by DingXuehua
+	//TODO....
+	//return chip->batt_full ? 100 : bound(soc, 0, 100);
+	
+	//return bound(soc, 0, 100);
+	chip->soc_now = bound(soc, 0, 100);
 
 	return chip->soc_now;
 }
+
+//ZTE-MODIFY by DingXuehua, add for soc sync
+#if defined FEATURE_SYNC_SOC
+#define DELTA_TIME 60
+static int smb1360_update_ui_soc(struct smb1360_chip *chip)
+{
+	static bool ui_soc_init = false;
+	static long last_time = 0;
+	struct timex txc;
+
+	do_gettimeofday(&(txc.time));
+	chip->fg_soc = smb1360_get_prop_batt_capacity(chip);
+	chip->charging_done_status = smb1360_get_prop_charging_done_status(chip);
+	
+	if(!ui_soc_init){
+		chip->ui_soc = chip->fg_soc;
+		ui_soc_init = true;
+	}
+
+	//pr_err("fg_soc=%d, ui_soc=%d, batt_full=%d, charging_done_status=%d, usb_present=%d\n",chip->fg_soc,chip->ui_soc,chip->batt_full,chip->charging_done_status,chip->usb_present);
+
+	/* return ui_soc by using fg_soc */
+	if((chip->fg_soc <= 90) ||
+		((chip->fg_soc > 90) && (chip->fg_soc >= chip->ui_soc)))
+	{
+		chip->ui_soc = chip->fg_soc;
+		//pr_err("case a, chip->ui_soc=%d\n",chip->ui_soc);
+		return chip->ui_soc;
+	}
+
+	/* keep ui_soc @100 when batt_full or charging_done_status */
+	if((chip->fg_soc > 90) && (chip->usb_present) && (chip->batt_full || chip->charging_done_status))
+	{
+		chip->ui_soc = 100;
+		//pr_err("case b, chip->ui_soc=%d\n",chip->ui_soc);
+		return chip->ui_soc;
+	}
+
+	//pr_err("txc.time.tv_sec=%ld, last_time=%ld, delta=%ld\n",txc.time.tv_sec,last_time,(txc.time.tv_sec - last_time));	
+	/* ui_soc change one percent every 1 min when fg_soc != ui_soc */
+	if((chip->fg_soc > 90) && (chip->fg_soc != chip->ui_soc) && (txc.time.tv_sec - last_time >= DELTA_TIME))
+	{
+		if((chip->fg_soc < chip->ui_soc) && (!chip->usb_present))
+		{
+			chip->ui_soc--;
+			last_time = txc.time.tv_sec;
+			//pr_err("case c1, chip->ui_soc=%d\n",chip->ui_soc);
+			return chip->ui_soc;
+		}
+		else if((chip->fg_soc > chip->ui_soc) && (chip->usb_present))
+		{
+			chip->ui_soc++;
+			last_time = txc.time.tv_sec;
+			//pr_err("case c2, chip->ui_soc=%d\n",chip->ui_soc);
+			return chip->ui_soc;
+		}
+		else if(((chip->fg_soc > chip->ui_soc) && (!chip->usb_present)) ||
+			((chip->fg_soc < chip->ui_soc) && (chip->usb_present)))
+		{
+			last_time = txc.time.tv_sec;
+			//pr_err("case c3, chip->ui_soc=%d\n",chip->ui_soc);
+			return chip->ui_soc;
+		}
+		else
+		{
+			//pr_err("case c4, do nothing here, chip->ui_soc=%d\n",chip->ui_soc);
+			return chip->ui_soc;
+		}
+	}
+	else
+	{
+		/* default */
+		//pr_err("case c5, chip->ui_soc=%d\n",chip->ui_soc);
+		return chip->ui_soc;
+	}
+}
+#endif
+//ZTE-MODIFY by DingXuehua, add for soc sync
 
 static int smb1360_get_prop_chg_full_design(struct smb1360_chip *chip)
 {
 	u8 reg[2];
 	int rc, fcc_mah = 0;
 
-	if (is_device_suspended(chip))
-		return chip->fcc_mah;
+	//if (is_device_suspended(chip))
+	//	return chip->fcc_mah;
 
 	rc = smb1360_read_bytes(chip, SHDW_FG_CAPACITY, reg, 2);
 	if (rc) {
-		pr_err("Failed to read SHDW_FG_CAPACITY rc=%d\n", rc);
-		return rc;
+		pr_err("Failed to read SHDW_FG_CAPACITY rc=%d, return old value %d\n", rc, chip->fcc_mah);
+		return chip->fcc_mah;
+		//return rc;
 	}
 	fcc_mah = (reg[1] << 8) | reg[0];
 
 	pr_debug("reg[0]=0x%02x reg[1]=0x%02x fcc_mah=%d\n",
 				reg[0], reg[1], fcc_mah);
 
+	//return fcc_mah * 1000;
 	chip->fcc_mah = fcc_mah * 1000;
 
 	return chip->fcc_mah;
@@ -1099,13 +1396,14 @@ static int smb1360_get_prop_batt_temp(struct smb1360_chip *chip)
 	u8 reg[2];
 	int rc, temp = 0;
 
-	if (is_device_suspended(chip))
-		return chip->temp_now;
+	//if (is_device_suspended(chip))
+	//	return chip->temp_now;
 
 	rc = smb1360_read_bytes(chip, SHDW_FG_BATT_TEMP, reg, 2);
 	if (rc) {
-		pr_err("Failed to read SHDW_FG_BATT_TEMP rc=%d\n", rc);
-		return rc;
+		pr_err("Failed to read SHDW_FG_BATT_TEMP rc=%d, return old value %d\n", rc, chip->temp_now);
+		return chip->temp_now;
+		//return rc;
 	}
 
 	temp = (reg[1] << 8) | reg[0];
@@ -1125,13 +1423,17 @@ static int smb1360_get_prop_voltage_now(struct smb1360_chip *chip)
 	u8 reg[2];
 	int rc, temp = 0;
 
+#if 0
 	if (is_device_suspended(chip))
 		return chip->voltage_now;
+#endif
 
 	rc = smb1360_read_bytes(chip, SHDW_FG_VTG_NOW, reg, 2);
 	if (rc) {
-		pr_err("Failed to read SHDW_FG_VTG_NOW rc=%d\n", rc);
-		return rc;
+		pr_err("Failed to read SHDW_FG_VTG_NOW rc=%d, return old value %d\n", rc, chip->voltage_now);
+		//if (is_device_suspended(chip))
+		return chip->voltage_now;
+		//return rc;
 	}
 
 	temp = (reg[1] << 8) | reg[0];
@@ -1152,13 +1454,14 @@ static int smb1360_get_prop_batt_resistance(struct smb1360_chip *chip)
 	int rc;
 	int64_t resistance;
 
-	if (is_device_suspended(chip))
-		return chip->resistance_now;
+	//if (is_device_suspended(chip))
+	//	return chip->resistance_now;
 
 	rc = smb1360_read_bytes(chip, SHDW_FG_ESR_ACTUAL, reg, 2);
 	if (rc) {
-		pr_err("Failed to read FG_ESR_ACTUAL rc=%d\n", rc);
-		return rc;
+		pr_err("Failed to read FG_ESR_ACTUAL rc=%d, return old value %d\n", rc, chip->resistance_now);
+		return chip->resistance_now;
+		//return rc;
 	}
 	temp = (reg[1] << 8) | reg[0];
 
@@ -1177,13 +1480,14 @@ static int smb1360_get_prop_current_now(struct smb1360_chip *chip)
 	u8 reg[2];
 	int rc, temp = 0;
 
-	if (is_device_suspended(chip))
-		return chip->current_now;
+	//if (is_device_suspended(chip))
+	//	return chip->current_now;
 
 	rc = smb1360_read_bytes(chip, SHDW_FG_CURR_NOW, reg, 2);
 	if (rc) {
-		pr_err("Failed to read SHDW_FG_CURR_NOW rc=%d\n", rc);
-		return rc;
+		pr_err("Failed to read SHDW_FG_CURR_NOW rc=%d, return old value %d\n", rc, chip->current_now);
+		return chip->current_now;
+		//return rc;
 	}
 
 	temp = ((s8)reg[1] << 8) | reg[0];
@@ -1210,18 +1514,19 @@ static int smb1360_set_minimum_usb_current(struct smb1360_chip *chip)
 		if (rc)
 			pr_err("Couldn't set ICL mA rc=%d\n", rc);
 
-		if (!(chip->workaround_flags & WRKRND_USB100_FAIL))
+		if (!(chip->workaround_flags & WRKRND_USB100_FAIL)){
 			rc = smb1360_masked_write(chip, CMD_IL_REG,
 					USB_CTRL_MASK, USB_100_BIT);
 			if (rc)
 				pr_err("Couldn't configure for USB100 rc=%d\n",
 								rc);
+		}
 	} else {
 		pr_debug("USB min current set to 500mA\n");
 		rc = smb1360_masked_write(chip, CMD_IL_REG,
 				USB_CTRL_MASK, USB_500_BIT);
 		if (rc)
-			pr_err("Couldn't configure for USB100 rc=%d\n",
+			pr_err("Couldn't configure for USB500 rc=%d\n",
 							rc);
 	}
 
@@ -1256,12 +1561,12 @@ static int smb1360_set_appropriate_usb_current(struct smb1360_chip *chip)
 
 	current_ma = min(therm_ma, path_current);
 
-	if (chip->workaround_flags & WRKRND_HARD_JEITA) {
+	//if (chip->workaround_flags & WRKRND_HARD_JEITA) {
 		if (chip->batt_warm)
 			current_ma = min(current_ma, chip->warm_bat_ma);
 		else if (chip->batt_cool)
 			current_ma = min(current_ma, chip->cool_bat_ma);
-	}
+	//}
 
 	if (current_ma <= 2) {
 		/*
@@ -1351,7 +1656,11 @@ static int smb1360_set_appropriate_usb_current(struct smb1360_chip *chip)
 		if (rc)
 			pr_err("Couldn't configure for USB AC rc=%d\n", rc);
 
+#if defined ZTE_CHARGER_DEBUG
+		pr_err("fast-chg current set to = %d\n", fastchg_current[i]);
+#else
 		pr_debug("fast-chg current set to = %d\n", fastchg_current[i]);
+#endif
 	}
 
 	return rc;
@@ -1521,7 +1830,13 @@ static int smb1360_battery_get_property(struct power_supply *psy,
 		val->intval = smb1360_get_prop_charge_type(chip);
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
+		//ZTE-MODIFY by DingXuehua, add for soc sync
+		#if defined FEATURE_SYNC_SOC
+		val->intval = smb1360_update_ui_soc(chip);
+		#else
 		val->intval = smb1360_get_prop_batt_capacity(chip);
+		#endif
+		//ZTE-MODIFY by DingXuehua, add for soc sync
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
 		val->intval = smb1360_get_prop_chg_full_design(chip);
@@ -1540,6 +1855,10 @@ static int smb1360_battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_SYSTEM_TEMP_LEVEL:
 		val->intval = chip->therm_lvl_sel;
+		break;
+	//ZTE-MODIFY by DingXuehua, add battery type in Emode
+	case POWER_SUPPLY_PROP_TECHNOLOGY:
+		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
 		break;
 	default:
 		return -EINVAL;
@@ -1560,7 +1879,15 @@ static void smb1360_external_power_changed(struct power_supply *psy)
 		dev_err(chip->dev,
 			"could not read USB current_max property, rc=%d\n", rc);
 	else
+	{
 		current_limit = prop.intval / 1000;
+		/* ZTE-MODIFY BY DingXuehua, set max current */
+		if(chip->adapter_curr_limit != -EINVAL)
+		{
+			if(current_limit >= chip->adapter_curr_limit)
+				current_limit = chip->adapter_curr_limit;
+		}
+	}
 
 	pr_debug("current_limit = %d\n", current_limit);
 
@@ -1594,14 +1921,26 @@ static void smb1360_external_power_changed(struct power_supply *psy)
 
 static int hot_hard_handler(struct smb1360_chip *chip, u8 rt_stat)
 {
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("rt_stat = 0x%02x\n", rt_stat);
+#else
 	pr_debug("rt_stat = 0x%02x\n", rt_stat);
+#endif
 	chip->batt_hot = !!rt_stat;
+	if(chip->batt_hot)
+		wake_lock(&usb_present_wakelock);
+	else
+		wake_unlock(&usb_present_wakelock);
 	return 0;
 }
 
 static int cold_hard_handler(struct smb1360_chip *chip, u8 rt_stat)
 {
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("rt_stat = 0x%02x\n", rt_stat);
+#else
 	pr_debug("rt_stat = 0x%02x\n", rt_stat);
+#endif
 	chip->batt_cold = !!rt_stat;
 	return 0;
 }
@@ -1644,7 +1983,7 @@ static void smb1360_jeita_work_fn(struct work_struct *work)
 		if (rc)
 			pr_err("Couldn't set USB current\n");
 		rc = smb1360_set_soft_jeita_threshold(chip,
-			chip->warm_bat_decidegc, chip->hot_bat_decidegc);
+			(chip->warm_bat_decidegc - 30), chip->hot_bat_decidegc);
 		if (rc) {
 			dev_err(chip->dev, "Couldn't set jeita threshold\n");
 			goto end;
@@ -1677,8 +2016,12 @@ static void smb1360_jeita_work_fn(struct work_struct *work)
 			dev_err(chip->dev, "Couldn't set float voltage\n");
 			goto end;
 		}
+		//ZTE-MODIFY by DingXuehua, the usb current also need set when battery status is cool
+		rc = smb1360_set_appropriate_usb_current(chip);
+		if (rc)
+			pr_err("Couldn't set USB current\n");
 		rc = smb1360_set_soft_jeita_threshold(chip,
-			chip->cold_bat_decidegc, chip->cool_bat_decidegc);
+			chip->cold_bat_decidegc, (chip->cool_bat_decidegc + 30));
 		if (rc) {
 			dev_err(chip->dev, "Couldn't set jeita threshold\n");
 			goto end;
@@ -1692,8 +2035,11 @@ static void smb1360_jeita_work_fn(struct work_struct *work)
 			goto end;
 		}
 	}
-
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("warm %d, cool %d, soft_cold_rt_sts %d, soft_hot_rt_sts %d, jeita supported %d, threshold_now %d %d\n",
+#else
 	pr_debug("warm %d, cool %d, soft_cold_rt_sts %d, soft_hot_rt_sts %d, jeita supported %d, threshold_now %d %d\n",
+#endif
 		chip->batt_warm, chip->batt_cool, !!chip->soft_cold_rt_stat,
 		!!chip->soft_hot_rt_stat, chip->soft_jeita_supported,
 		chip->soft_cold_thresh, chip->soft_hot_thresh);
@@ -1701,10 +2047,44 @@ end:
 	pm_relax(chip->dev);
 }
 
+static int smb1360_set_recharge_thresh_fg_source(struct smb1360_chip *chip)
+{
+	int rc = -1;
+	
+	/* Only apply when default using soc based resume charging */
+	if (chip->fg_auto_recharge_soc != -EINVAL) {
+		if (chip->batt_warm || chip->batt_cool) {
+			rc = smb1360_masked_write(chip, CFG_CHG_FUNC_CTRL_REG,
+						CHG_RECHG_THRESH_FG_SRC_BIT,
+						0);
+			if (rc) {
+				dev_err(chip->dev, "Couldn't write to CFG_CHG_FUNC_CTRL_REG rc=%d\n",
+									rc);
+				return rc;
+			}
+		} else {
+			rc = smb1360_masked_write(chip, CFG_CHG_FUNC_CTRL_REG,
+						CHG_RECHG_THRESH_FG_SRC_BIT,
+						CHG_RECHG_THRESH_FG_SRC_BIT);
+			if (rc) {
+				dev_err(chip->dev, "Couldn't write to CFG_CHG_FUNC_CTRL_REG rc=%d\n",
+									rc);
+				return rc;
+			}
+		}
+	}
+
+	return 0;
+}
+
 static int hot_soft_handler(struct smb1360_chip *chip, u8 rt_stat)
 {
 	chip->soft_hot_rt_stat = rt_stat;
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("rt_stat = 0x%02x\n", rt_stat);
+#else
 	pr_debug("rt_stat = 0x%02x\n", rt_stat);
+#endif
 	if (!chip->config_hard_thresholds)
 		chip->batt_warm = !!rt_stat;
 
@@ -1714,13 +2094,21 @@ static int hot_soft_handler(struct smb1360_chip *chip, u8 rt_stat)
 					msecs_to_jiffies(JEITA_WORK_MS));
 		pm_stay_awake(chip->dev);
 	}
+
+	smb1360_set_appropriate_usb_current(chip);
+	smb1360_set_recharge_thresh_fg_source(chip);
+	
 	return 0;
 }
 
 static int cold_soft_handler(struct smb1360_chip *chip, u8 rt_stat)
 {
 	chip->soft_cold_rt_stat = rt_stat;
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("rt_stat = 0x%02x\n", rt_stat);
+#else
 	pr_debug("rt_stat = 0x%02x\n", rt_stat);
+#endif
 	if (!chip->config_hard_thresholds)
 		chip->batt_cool = !!rt_stat;
 
@@ -1730,6 +2118,10 @@ static int cold_soft_handler(struct smb1360_chip *chip, u8 rt_stat)
 					msecs_to_jiffies(JEITA_WORK_MS));
 		pm_stay_awake(chip->dev);
 	}
+
+	smb1360_set_appropriate_usb_current(chip);
+	smb1360_set_recharge_thresh_fg_source(chip);
+
 	return 0;
 }
 
@@ -1742,7 +2134,16 @@ static int battery_missing_handler(struct smb1360_chip *chip, u8 rt_stat)
 
 static int vbat_low_handler(struct smb1360_chip *chip, u8 rt_stat)
 {
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("vbat low\n");
+#else
 	pr_debug("vbat low\n");
+#endif
+
+#if defined FEATURE_SYNC_SOC
+	if(chip->fg_soc == 0 && chip->ui_soc > 0)
+		chip->ui_soc--;
+#endif
 
 	return 0;
 }
@@ -1755,14 +2156,38 @@ static int chg_hot_handler(struct smb1360_chip *chip, u8 rt_stat)
 
 static int chg_term_handler(struct smb1360_chip *chip, u8 rt_stat)
 {
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("rt_stat = 0x%02x\n", rt_stat);
+#else
 	pr_debug("rt_stat = 0x%02x\n", rt_stat);
+#endif
 	chip->batt_full = !!rt_stat;
+	if(chip->batt_full)
+		wake_unlock(&usb_present_wakelock);
+	else
+		wake_lock(&usb_present_wakelock);
+
 	return 0;
 }
 
 static int chg_fastchg_handler(struct smb1360_chip *chip, u8 rt_stat)
 {
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("rt_stat = 0x%02x\n", rt_stat);
+#else
 	pr_debug("rt_stat = 0x%02x\n", rt_stat);
+#endif
+
+	return 0;
+}
+
+static int battery_ov_handler(struct smb1360_chip *chip, u8 rt_stat)
+{
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("battery OV! rt_stat = 0x%02x\n", rt_stat);
+#else
+	pr_debug("battery OV! rt_stat = 0x%02x\n", rt_stat);
+#endif
 
 	return 0;
 }
@@ -1771,18 +2196,66 @@ static int usbin_uv_handler(struct smb1360_chip *chip, u8 rt_stat)
 {
 	bool usb_present = !rt_stat;
 
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("chip->usb_present = %d usb_present = %d\n",
+				chip->usb_present, usb_present);
+#else
 	pr_debug("chip->usb_present = %d usb_present = %d\n",
 				chip->usb_present, usb_present);
+#endif
+
+	//ZTE-MODIFY By DingXuehua, fix sometimes screen not on after usb removed
+	if(probe_done_flag)
+		wake_lock_timeout(&usbin_valid_irq_wakelock, 5* HZ);
+
 	if (chip->usb_present && !usb_present) {
 		/* USB removed */
 		chip->usb_present = usb_present;
+		chip->batt_full = false;
 		power_supply_set_present(chip->usb_psy, usb_present);
+		wake_unlock(&usb_present_wakelock);
 	}
 
 	if (!chip->usb_present && usb_present) {
 		/* USB inserted */
 		chip->usb_present = usb_present;
 		power_supply_set_present(chip->usb_psy, usb_present);
+		wake_lock(&usb_present_wakelock);
+	}
+
+	return 0;
+}
+
+//ZTE-MODIFY by DingXuehua, add functionfor charger OV
+static int usbin_ov_handler(struct smb1360_chip *chip, u8 rt_stat)
+{
+	bool usb_present = !rt_stat;
+
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("chip->usb_present = %d usb_present = %d\n",
+				chip->usb_present, usb_present);
+#else
+	pr_debug("chip->usb_present = %d usb_present = %d\n",
+				chip->usb_present, usb_present);
+#endif
+
+	//ZTE-MODIFY By DingXuehua, fix sometimes screen not on after usb removed
+	if(probe_done_flag)
+		wake_lock_timeout(&usbin_valid_irq_wakelock, 5* HZ);
+
+	if (chip->usb_present && !usb_present) {
+		/* USB removed */
+		chip->usb_present = usb_present;
+		chip->batt_full = false;
+		power_supply_set_present(chip->usb_psy, usb_present);
+		wake_unlock(&usb_present_wakelock);
+	}
+
+	if (!chip->usb_present && usb_present) {
+		/* USB inserted */
+		chip->usb_present = usb_present;
+		power_supply_set_present(chip->usb_psy, usb_present);
+		wake_lock(&usb_present_wakelock);
 	}
 
 	return 0;
@@ -1802,14 +2275,33 @@ static int chg_inhibit_handler(struct smb1360_chip *chip, u8 rt_stat)
 
 static int delta_soc_handler(struct smb1360_chip *chip, u8 rt_stat)
 {
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("SOC changed! - rt_stat = 0x%02x\n", rt_stat);
+#else
 	pr_debug("SOC changed! - rt_stat = 0x%02x\n", rt_stat);
+#endif
+
+	return 0;
+}
+
+static int chg_error_handler(struct smb1360_chip *chip, u8 rt_stat)
+{
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("charging error! - rt_stat = 0x%02x\n", rt_stat);
+#else
+	pr_debug("charging error! - rt_stat = 0x%02x\n", rt_stat);
+#endif
 
 	return 0;
 }
 
 static int min_soc_handler(struct smb1360_chip *chip, u8 rt_stat)
 {
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("SOC dropped below min SOC, rt_stat = 0x%02x\n", rt_stat);
+#else
 	pr_debug("SOC dropped below min SOC, rt_stat = 0x%02x\n", rt_stat);
+#endif
 
 	if (chip->awake_min_soc)
 		rt_stat ? pm_stay_awake(chip->dev) : pm_relax(chip->dev);
@@ -1819,7 +2311,11 @@ static int min_soc_handler(struct smb1360_chip *chip, u8 rt_stat)
 
 static int empty_soc_handler(struct smb1360_chip *chip, u8 rt_stat)
 {
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("SOC empty! rt_stat = 0x%02x\n", rt_stat);
+#else
 	pr_debug("SOC empty! rt_stat = 0x%02x\n", rt_stat);
+#endif
 
 	if (!chip->empty_soc_disabled) {
 		if (rt_stat) {
@@ -1838,14 +2334,22 @@ static int empty_soc_handler(struct smb1360_chip *chip, u8 rt_stat)
 static int full_soc_handler(struct smb1360_chip *chip, u8 rt_stat)
 {
 	if (rt_stat)
+#if defined ZTE_CHARGER_DEBUG
+		pr_err("SOC is 100\n");
+#else
 		pr_debug("SOC is 100\n");
+#endif
 
 	return 0;
 }
 
 static int fg_access_allowed_handler(struct smb1360_chip *chip, u8 rt_stat)
 {
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("stat=%d\n", !!rt_stat);
+#else
 	pr_debug("stat=%d\n", !!rt_stat);
+#endif
 
 	if (rt_stat & FG_ACCESS_ALLOWED_BIT) {
 		pr_debug("FG access granted\n");
@@ -2147,6 +2651,7 @@ static struct irq_handler_info handlers[] = {
 			},
 			{
 				.name		= "battery_ov",
+				.smb_irq	= battery_ov_handler,
 			},
 		},
 	},
@@ -2158,6 +2663,8 @@ static struct irq_handler_info handlers[] = {
 			},
 			{
 				.name		= "usbin_ov",
+				//ZTE-MODIFY by DingXuehua, add function usbin_uv_handler.
+				.smb_irq	= usbin_ov_handler,
 			},
 			{
 				.name		= "unused",
@@ -2194,6 +2701,7 @@ static struct irq_handler_info handlers[] = {
 			},
 			{
 				.name		= "chg_error",
+				.smb_irq	= chg_error_handler,
 			},
 			{
 				.name		= "wd_timeout",
@@ -2238,6 +2746,16 @@ static struct irq_handler_info handlers[] = {
 		},
 	},
 };
+
+//ZTE--MODIFY By DingXuehua
+static int smb1360_show_batt_prop(struct smb1360_chip *chip)
+{
+	pr_err("present=%d, full=%d, charging_done_status=%d, warm=%d, cool=%d, %d%%_ui, %d%%, %d_degC, %duV, %duA\n",
+		chip->usb_present,chip->batt_full,chip->charging_done_status,chip->batt_warm,chip->batt_cool,
+		chip->ui_soc,chip->soc_now,chip->temp_now,chip->voltage_now,chip->current_now);
+
+	return 0;
+}
 
 #define IRQ_LATCHED_MASK	0x02
 #define IRQ_STATUS_MASK		0x01
@@ -2308,8 +2826,10 @@ static irqreturn_t smb1360_stat_handler(int irq, void *dev_id)
 	}
 
 	pr_debug("handler count = %d\n", handler_count);
-	if (handler_count)
+	if (handler_count){
+		smb1360_show_batt_prop(chip);
 		power_supply_changed(&chip->batt_psy);
+	}
 
 	mutex_unlock(&chip->irq_complete);
 
@@ -2889,14 +3409,20 @@ static int smb1360_regulator_init(struct smb1360_chip *chip)
 
 static int smb1360_check_batt_profile(struct smb1360_chip *chip)
 {
-	int rc, i, timeout = 50;
+	int rc, timeout = 50;
 	u8 reg = 0, loaded_profile, new_profile = 0, bid_mask;
 
+//ZTE-MODIFY by DingXuehua, choose which profile to load
+#if 1
+	if(chip->profile_to_load == -EINVAL)
+		return 0;
+#else
 	if (!chip->connected_rid) {
 		pr_debug("Skip batt-profile loading connected_rid=%d\n",
 						chip->connected_rid);
 		return 0;
 	}
+#endif
 
 	rc = smb1360_read(chip, SHDW_FG_BATT_STATUS, &reg);
 	if (rc) {
@@ -2907,8 +3433,10 @@ static int smb1360_check_batt_profile(struct smb1360_chip *chip)
 	loaded_profile = !!(reg & BATTERY_PROFILE_BIT) ?
 			BATTERY_PROFILE_B : BATTERY_PROFILE_A;
 
-	pr_debug("fg_batt_status=%x loaded_profile=%d\n", reg, loaded_profile);
+	pr_debug("fg_batt_status=0x%x loaded_profile=%d\n", reg, loaded_profile);
 
+//ZTE-MODIFY by DingXuehua, choose which profile to load
+#if 0
 	for (i = 0; i < BATTERY_PROFILE_MAX; i++) {
 		pr_debug("profile=%d profile_rid=%d connected_rid=%d\n", i,
 						chip->profile_rid[i],
@@ -2934,6 +3462,17 @@ static int smb1360_check_batt_profile(struct smb1360_chip *chip)
 						loaded_profile, new_profile);
 		}
 	}
+#else
+	if(chip->profile_to_load == loaded_profile){
+		pr_err("Need NOT reload profile\n");
+		return 0;
+	}else{
+		new_profile = chip->profile_to_load;
+		bid_mask = (new_profile == BATTERY_PROFILE_A) ?
+				BATT_PROFILEA_MASK : BATT_PROFILEB_MASK;
+		pr_err("new profile is %d, old profile is %d\n",new_profile,loaded_profile);
+	}
+#endif
 
 	/* set the BID mask */
 	rc = smb1360_masked_write(chip, CFG_FG_BATT_CTRL_REG,
@@ -3048,14 +3587,17 @@ static int determine_initial_status(struct smb1360_chip *chip)
 		}
 	}
 
+	smb1360_set_recharge_thresh_fg_source(chip);
+
 	rc = smb1360_read(chip, IRQ_E_REG, &reg);
 	if (rc < 0) {
 		dev_err(chip->dev, "Couldn't read irq E rc = %d\n", rc);
 		return rc;
 	}
 	UPDATE_IRQ_STAT(IRQ_E_REG, reg);
-
-	chip->usb_present = (reg & IRQ_E_USBIN_UV_BIT) ? false : true;
+	//ZTE-MODIFY By DingXuehua, add IRQ_E_USBIN_OV_BIT
+	//chip->usb_present = (reg & IRQ_E_USBIN_UV_BIT) ? false : true;
+	chip->usb_present = ((reg & IRQ_E_USBIN_UV_BIT) || (reg & IRQ_E_USBIN_OV_BIT)) ? false : true;
 	power_supply_set_present(chip->usb_psy, chip->usb_present);
 
 	return 0;
@@ -3120,7 +3662,9 @@ disable_fg_reset:
 	 */
 	if (!(chip->workaround_flags & WRKRND_FG_CONFIG_FAIL)) {
 		if (chip->delta_soc != -EINVAL) {
-			reg = abs(((chip->delta_soc * MAX_8_BITS) / 100) - 1);
+			//ZTE-MODIFY by DingXuehua, use min threshold for SOC updating
+			//reg = abs(((chip->delta_soc * MAX_8_BITS) / 100) - 1);
+			reg = 1;
 			pr_debug("delta_soc=%d reg=%x\n", chip->delta_soc, reg);
 			rc = smb1360_write(chip, SOC_DELTA_REG, reg);
 			if (rc) {
@@ -3429,11 +3973,33 @@ static int smb1360_jeita_init(struct smb1360_chip *chip)
 	if (chip->config_hard_thresholds) {
 		if (chip->soft_jeita_supported) {
 			chip->workaround_flags |= WRKRND_HARD_JEITA;
+			temp = min(chip->warm_bat_ma, chip->cool_bat_ma);
+			rc = smb1360_set_jeita_comp_curr(chip, temp);
+			if (rc) {
+				dev_err(chip->dev, "Couldn't set comp current\n");
+				return rc;
+			}
+
+			temp = (chip->vfloat_mv - chip->warm_bat_mv) / 10;
+			rc = smb1360_masked_write(chip, CFG_FVC_REG,
+					FLT_VTG_COMP_MASK, temp);
+			if (rc < 0) {
+				dev_err(chip->dev, "Couldn't set VFLT compensation = %d",
+									rc);
+				return rc;
+			}
+
 			rc = smb1360_set_soft_jeita_threshold(chip,
 			chip->cool_bat_decidegc, chip->warm_bat_decidegc);
 			if (rc) {
 				dev_err(chip->dev,
 					"Couldn't set jeita threshold\n");
+				return rc;
+			}
+
+			rc = smb1360_soft_jeita_comp_enable(chip, true);
+			if (rc) {
+				dev_err(chip->dev, "Couldn't enable jeita\n");
 				return rc;
 			}
 		} else {
@@ -3520,6 +4086,10 @@ static int smb1360_hw_init(struct smb1360_chip *chip)
 	int i;
 	u8 reg, mask;
 
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("smb1360_hw_init begin\n");
+#endif
+
 	smb1360_check_feature_support(chip);
 
 	rc = smb1360_enable_volatile_writes(chip);
@@ -3549,7 +4119,8 @@ static int smb1360_hw_init(struct smb1360_chip *chip)
 	rc = smb1360_masked_write(chip, CFG_CHG_MISC_REG,
 					CHG_EN_BY_PIN_BIT
 					| CHG_EN_ACTIVE_LOW_BIT
-					| PRE_TO_FAST_REQ_CMD_BIT,
+					| PRE_TO_FAST_REQ_CMD_BIT
+					| BAT_OVP_ENDS_CHG_CYCLE_BIT,
 					0);
 	if (rc < 0) {
 		dev_err(chip->dev, "Couldn't set CFG_CHG_MISC_REG rc=%d\n", rc);
@@ -3715,6 +4286,8 @@ static int smb1360_hw_init(struct smb1360_chip *chip)
 	/* interrupt enabling - active low */
 	if (chip->client->irq) {
 		mask = CHG_STAT_IRQ_ONLY_BIT
+			//ZTE-MODIFY By DingXuehua
+			| CHG_STAT_LOW_BAT_BLINK_BIT
 			| CHG_STAT_ACTIVE_HIGH_BIT
 			| CHG_STAT_DISABLE_BIT
 			| CHG_TEMP_CHG_ERR_BLINK_BIT;
@@ -3722,7 +4295,9 @@ static int smb1360_hw_init(struct smb1360_chip *chip)
 		if (!chip->pulsed_irq)
 			reg = CHG_STAT_IRQ_ONLY_BIT;
 		else
-			reg = CHG_TEMP_CHG_ERR_BLINK_BIT;
+			//ZTE-MODIFY By DingXuehua
+			//reg = CHG_TEMP_CHG_ERR_BLINK_BIT;
+			reg = 0;
 		rc = smb1360_masked_write(chip, CFG_STAT_CTRL_REG, mask, reg);
 		if (rc < 0) {
 			dev_err(chip->dev, "Couldn't set irq config rc = %d\n",
@@ -3735,6 +4310,8 @@ static int smb1360_hw_init(struct smb1360_chip *chip)
 				IRQ_BAT_HOT_COLD_HARD_BIT
 				| IRQ_BAT_HOT_COLD_SOFT_BIT
 				| IRQ_INTERNAL_TEMPERATURE_BIT
+				//ZTE-MODIFY by DingXuehua, add IRQ_DCIN_OV_BIT 
+				| IRQ_DCIN_OV_BIT
 				| IRQ_DCIN_UV_BIT);
 		if (rc) {
 			dev_err(chip->dev, "Couldn't set irq1 config rc = %d\n",
@@ -3765,6 +4342,29 @@ static int smb1360_hw_init(struct smb1360_chip *chip)
 		if (rc < 0) {
 			dev_err(chip->dev, "Couldn't set irq3 enable rc = %d\n",
 					rc);
+			return rc;
+		}
+
+		//ZTE-MODIFY by DingXuehua, set pre-to-fast charge battery voltage threshold
+		rc = smb1360_masked_write(chip, PRE2FAST_VOLTAGE_REG, PRE2FAST_VOLTAGE_THRESHOLD_MASK, 
+		                                PRE2FAST_VOLTAGE_3V1 << PRE2FAST_VOLTAGE_THRESHOLD_SHIFT);
+		if (rc < 0) {
+			dev_err(chip->dev, "Couldn't set PRE2FAST_VOLTAGE_THRESHOLD config = %d\n",rc);
+			return rc;
+		}
+
+		//ZTE-MODIFY by DingXuehua, set precharge current
+		rc = smb1360_masked_write(chip, CHG_CURRENT_REG, PRECHG_CURR_MASK, 
+		                                PRECHG_CURR_100MA << PRECHG_CURR_SHIFT);
+		if (rc < 0) {
+			dev_err(chip->dev, "Couldn't set PRE_CHARGE CURRENT config = %d\n",rc);
+			return rc;
+		}
+		
+		rc = smb1360_masked_write(chip, PRE2FAST_VOLTAGE_REG, OTG_UVLO_VOLTAGE_THRESHOLD_MASK, 
+		                                OTG_UVLO_VOLTAGE_2V86 << OTG_UVLO_VOLTAGE_THRESHOLD_SHIFT);
+		if (rc < 0) {
+			dev_err(chip->dev, "Couldn't set OTG_UVLO_VOLTAGE_THRESHOLD config = %d\n",rc);
 			return rc;
 		}
 	}
@@ -3799,10 +4399,24 @@ static int smb1360_hw_init(struct smb1360_chip *chip)
 			pr_err("Couldn't set OTG current limit, rc = %d\n", rc);
 	}
 
+	// ZTE-MODIFY By DingXuehua, enable JEITA temperature hard limit
+	rc = smb1360_masked_write(chip, CFG_FG_BATT_CTRL_REG,
+				JEITA_TEMP_HARD_LIMIT_BIT,
+				0x0);
+	if (rc < 0) {
+		dev_err(chip->dev, "Couldn't enable JEITA temperature hard limit = %d\n",
+									rc);
+		return rc;
+	}
+
 	rc = smb1360_charging_disable(chip, USER, !!chip->charging_disabled);
 	if (rc)
 		dev_err(chip->dev, "Couldn't '%s' charging rc = %d\n",
 			chip->charging_disabled ? "disable" : "enable", rc);
+
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("smb1360_hw_init finish\n");
+#endif
 
 	return rc;
 }
@@ -4039,6 +4653,80 @@ static int smb1360_parse_jeita_params(struct smb1360_chip *chip)
 	return rc;
 }
 
+#if defined CHEKC_PCB_HW_VERSION
+enum {
+	PCB_HW_VERSION_000,
+	PCB_HW_VERSION_100,
+	PCB_HW_VERSION_UNKNOWN,
+};
+
+static int smb_check_pcb_hw_version(struct smb1360_chip *chip)
+{
+	int hw_version_gpio_0_value = -1;
+	int hw_version_gpio_1_value = -1;
+	int hw_version_gpio_2_value = -1;
+
+	if(gpio_request(chip->hw_version_gpio_0,"hw_version_gpio_0") < 0){
+		pr_err("request gpio %d failed\n",chip->hw_version_gpio_0);
+		return -1;
+	}
+	if(!gpio_is_valid(chip->hw_version_gpio_0)){
+		pr_err("gpio %d is invalid\n",chip->hw_version_gpio_0);
+		return -1;
+	}
+	if(gpio_direction_input(chip->hw_version_gpio_0)){
+		pr_err("gpio %d direction input failed\n",chip->hw_version_gpio_0);
+		return -1;
+	}
+	pr_err("GPIO[%d] for hw_version_gpio_0 init success\n",chip->hw_version_gpio_0);
+
+
+	if(gpio_request(chip->hw_version_gpio_1,"hw_version_gpio_1") < 0){
+		pr_err("request gpio %d failed\n",chip->hw_version_gpio_1);
+		return -1;
+	}
+	if(!gpio_is_valid(chip->hw_version_gpio_1)){
+		pr_err("gpio %d is invalid\n",chip->hw_version_gpio_1);
+		return -1;
+	}
+	if(gpio_direction_input(chip->hw_version_gpio_1)){
+		pr_err("gpio %d direction input failed\n",chip->hw_version_gpio_1);
+		return -1;
+	}
+	pr_err("GPIO[%d] for hw_version_gpio_1 init success\n",chip->hw_version_gpio_1);
+
+
+	if(gpio_request(chip->hw_version_gpio_2,"hw_version_gpio_2") < 0){
+		pr_err("request gpio %d failed\n",chip->hw_version_gpio_2);
+		return -1;
+	}
+	if(!gpio_is_valid(chip->hw_version_gpio_2)){
+		pr_err("gpio %d is invalid\n",chip->hw_version_gpio_2);
+		return -1;
+	}
+	if(gpio_direction_input(chip->hw_version_gpio_2)){
+		pr_err("gpio %d direction input failed\n",chip->hw_version_gpio_2);
+		return -1;
+	}
+	pr_err("GPIO[%d] for hw_version_gpio_2 init success\n",chip->hw_version_gpio_2);
+
+	hw_version_gpio_0_value = gpio_get_value(chip->hw_version_gpio_0);
+	hw_version_gpio_1_value = gpio_get_value(chip->hw_version_gpio_1);
+	hw_version_gpio_2_value = gpio_get_value(chip->hw_version_gpio_2);
+	pr_err("pcb hw version is [%d%d%d]\n",hw_version_gpio_0_value,hw_version_gpio_1_value,hw_version_gpio_2_value);
+
+	if((0 == hw_version_gpio_0_value) && (0 ==hw_version_gpio_1_value) && (0 == hw_version_gpio_2_value)){
+		return PCB_HW_VERSION_000;
+	}else if((1 == hw_version_gpio_0_value) && (0 ==hw_version_gpio_1_value) && (0 == hw_version_gpio_2_value)){
+		return PCB_HW_VERSION_100;
+	}else{
+		return PCB_HW_VERSION_UNKNOWN;
+	}
+
+	return -1;
+}
+#endif
+
 static int smb_parse_dt(struct smb1360_chip *chip)
 {
 	int rc;
@@ -4049,7 +4737,21 @@ static int smb_parse_dt(struct smb1360_chip *chip)
 		return -EINVAL;
 	}
 
+#if defined CHEKC_PCB_HW_VERSION
+	chip->hw_version_gpio_0 = of_get_named_gpio(node, "qcom,hw-version-gpio-0", 0);
+	chip->hw_version_gpio_1 = of_get_named_gpio(node, "qcom,hw-version-gpio-1", 0);
+	chip->hw_version_gpio_2 = of_get_named_gpio(node, "qcom,hw-version-gpio-2", 0);
+
+	rc = smb_check_pcb_hw_version(chip);
+	
+	if(PCB_HW_VERSION_000 == rc)
+		chip->rsense_10mohm = false;
+	else
+		chip->rsense_10mohm = true;
+
+#else
 	chip->rsense_10mohm = of_property_read_bool(node, "qcom,rsense-10mhom");
+#endif
 
 	if (of_property_read_bool(node, "qcom,batt-profile-select")) {
 		rc = smb_parse_batt_id(chip);
@@ -4082,6 +4784,10 @@ static int smb_parse_dt(struct smb1360_chip *chip)
 			}
 		}
 	}
+
+#if defined(CONFIG_ZTE_PRE_CHARGE_LED_GPIO)
+	chip->pre_charge_led = of_get_named_gpio(node, "qcom,pre-charge-led-gpio", 0);
+#endif
 
 	chip->pulsed_irq = of_property_read_bool(node, "qcom,stat-pulsed-irq");
 
@@ -4237,13 +4943,102 @@ static int smb_parse_dt(struct smb1360_chip *chip)
 		rc = of_property_read_u32(node, "qcom,fg-reset-thresold-mv",
 						&chip->fg_reset_threshold_mv);
 		if (rc) {
-			pr_debug("FG reset voltage threshold not specified using 50mV\n");
+			pr_debug("FG reset voltage threshold not specified using 15mV\n");
 			chip->fg_reset_threshold_mv = FG_RESET_THRESHOLD_MV;
 		}
 	}
 
+	//ZTE-MODIFY BY DingXuehua, set max current
+	rc = of_property_read_u32(node, "qcom,adapter-current-limit",
+					&chip->adapter_curr_limit);
+	if (rc < 0)
+		chip->adapter_curr_limit = -EINVAL;
+
+	//ZTE-MODIFY by DingXuehua, choose which profile to load
+	rc = of_property_read_u32(node, "qcom,profile_to_load",
+					&chip->profile_to_load);
+	if (rc < 0) {
+		pr_err("failed to read qcom,profile_to_load\n");
+		chip->profile_to_load = -EINVAL;
+	}
+
 	return 0;
 }
+
+//ZTE-MODIFY by DingXuehua, add for soc sync
+#if 0// defined FEATURE_SYNC_SOC
+#define HEARTBEAT_MS	10000
+#define HEARTBEAT_COUNTER	6	//	1 min
+static void update_heartbeat(struct work_struct *work)
+{
+	struct delayed_work *dwork = to_delayed_work(work);
+	struct smb1360_chip *chip = container_of(dwork, struct smb1360_chip, update_heartbeat_work);
+	static int counter = 0;
+	static bool need_update = false;
+
+	if(counter >= HEARTBEAT_COUNTER)
+	{
+		need_update = true;
+	}
+
+	if(chip->batt_full)
+		chip->keep_ui_soc_full = true;
+	
+	if(need_update)//update soc every 60s when in the process of sync phase
+	{
+		chip->fg_soc = smb1360_get_prop_batt_capacity(chip);
+		
+		if((chip->batt_full || chip->keep_ui_soc_full) && (chip->fg_soc >= 90))
+		{
+			chip->ui_soc = 100;
+		}
+		else
+		{
+			if(chip->ui_soc < chip->fg_soc)
+			{
+				chip->ui_soc++;
+			}
+
+			if(chip->ui_soc > chip->fg_soc)
+			{
+				chip->ui_soc--;
+			}
+		}
+		
+		power_supply_changed(&chip->batt_psy);
+		smb1360_show_batt_prop(chip);
+		need_update = false;
+		counter = 0;
+	}
+
+	counter++;
+	
+	schedule_delayed_work(&chip->update_heartbeat_work,
+		      round_jiffies_relative(msecs_to_jiffies(HEARTBEAT_MS)));
+}
+#endif
+//ZTE-MODIFY by DingXuehua
+
+//ZTE-MODIFY by DingXuehua, turn off precharging LED when boot kernel
+#if defined(CONFIG_ZTE_PRE_CHARGE_LED_GPIO)
+static int smb1360_init_pre_chg_led(struct smb1360_chip *chip)
+{
+	if(gpio_request(chip->pre_charge_led,"pre_charge_led") < 0){
+		pr_err("request gpio %d failed\n",chip->pre_charge_led);
+		return -1;
+	}
+	if(!gpio_is_valid(chip->pre_charge_led)){
+		pr_err("gpio %d is invalid\n",chip->pre_charge_led);
+		return -1;
+	}
+	if(gpio_direction_output(chip->pre_charge_led,1)){
+		pr_err("gpio %d direction output failed\n",chip->pre_charge_led);
+		return -1;
+	}
+	pr_err("GPIO[%d] for pre-chg-led init success\n",chip->pre_charge_led);
+	return 0;
+}
+#endif
 
 static int smb1360_probe(struct i2c_client *client,
 				const struct i2c_device_id *id)
@@ -4252,6 +5047,10 @@ static int smb1360_probe(struct i2c_client *client,
 	int rc;
 	struct smb1360_chip *chip;
 	struct power_supply *usb_psy;
+
+#if defined ZTE_CHARGER_DEBUG
+	pr_err("smb1360_probe begin\n");
+#endif
 
 	usb_psy = power_supply_get_by_name("usb");
 	if (!usb_psy) {
@@ -4302,7 +5101,7 @@ static int smb1360_probe(struct i2c_client *client,
 	mutex_init(&chip->current_change_lock);
 	chip->default_i2c_addr = client->addr;
 
-	pr_debug("default_i2c_addr=%x\n", chip->default_i2c_addr);
+	pr_err("default_i2c_addr=%x\n", chip->default_i2c_addr);
 
 	rc = smb1360_hw_init(chip);
 	if (rc < 0) {
@@ -4344,7 +5143,7 @@ static int smb1360_probe(struct i2c_client *client,
 	/* STAT irq configuration */
 	if (client->irq) {
 		rc = devm_request_threaded_irq(&client->dev, client->irq, NULL,
-				smb1360_stat_handler, IRQF_ONESHOT,
+				smb1360_stat_handler, IRQF_TRIGGER_LOW | IRQF_ONESHOT,
 				"smb1360_stat_irq", chip);
 		if (rc < 0) {
 			dev_err(&client->dev,
@@ -4472,11 +5271,55 @@ static int smb1360_probe(struct i2c_client *client,
 				rc);
 	}
 
+	//ZTE-MODIFY By DingXuehua, fix sometimes screen not on after usb removed
+	wake_lock_init(&usbin_valid_irq_wakelock, WAKE_LOCK_SUSPEND, "usbin_valid_irq_wl");
+	wake_lock_init(&usb_present_wakelock, WAKE_LOCK_SUSPEND, "usb_present_wl");
+	probe_done_flag = true;
+
+	if(smb1360_get_prop_charging_status(chip)){
+		pr_err("usb_present_wakelock\n");
+		wake_lock(&usb_present_wakelock);
+	}
+
+//ZTE-MODIFY by DingXuehua, turn off precharging LED when boot kernel
+#if defined(CONFIG_ZTE_PRE_CHARGE_LED_GPIO)
+	rc = smb1360_init_pre_chg_led(chip);
+	if  (rc) {
+		dev_err(&client->dev,
+			"Couldn't off pre charge led rc=%d\n", rc);
+		//return rc;
+	}
+#endif
+
+//ZTE-MODIFY by DingXuehua, add for soc sync
+#if defined FEATURE_SYNC_SOC
+	chip->charging_done_status = smb1360_get_prop_charging_done_status(chip);
+#if 0
+	INIT_DELAYED_WORK(&chip->update_heartbeat_work, update_heartbeat);
+	schedule_delayed_work(&chip->update_heartbeat_work,
+				          round_jiffies_relative(msecs_to_jiffies(HEARTBEAT_MS)));
+#endif
+#endif
+//ZTE-MODIFY by DingXuehua, add for soc sync
+
+#if defined FEATURE_SYNC_SOC
+	dev_info(chip->dev, "SMB1360 revision=0x%x probe success! batt=%d usb=%d ui_soc=%d\n",
+			chip->revision,
+			smb1360_get_prop_batt_present(chip),
+			chip->usb_present,
+			smb1360_update_ui_soc(chip));
+#else
 	dev_info(chip->dev, "SMB1360 revision=0x%x probe success! batt=%d usb=%d soc=%d\n",
 			chip->revision,
 			smb1360_get_prop_batt_present(chip),
 			chip->usb_present,
 			smb1360_get_prop_batt_capacity(chip));
+#endif
+
+	smb1360_show_batt_prop(chip);
+
+	/* ZTE-MODIFY BY Wangbin for disable usb charging and disable shutdown low battery*/
+	the_chip = chip;
 
 	return 0;
 
@@ -4499,7 +5342,9 @@ static int smb1360_remove(struct i2c_client *client)
 	mutex_destroy(&chip->otp_gain_lock);
 	mutex_destroy(&chip->fg_access_request_lock);
 	debugfs_remove_recursive(chip->debug_root);
-
+	//ZTE-MODIFY By DingXuehua, fix sometimes screen not on after usb removed
+	wake_lock_destroy(&usbin_valid_irq_wakelock);
+	wake_lock_destroy(&usb_present_wakelock);	
 	return 0;
 }
 
@@ -4519,6 +5364,8 @@ static int smb1360_suspend(struct device *dev)
 
 	/* enable only important IRQs */
 	rc = smb1360_write(chip, IRQ_CFG_REG, IRQ_DCIN_UV_BIT
+						//ZTE-MODIFY by DingXuehua, add IRQ_DCIN_OV_BIT 
+						| IRQ_DCIN_OV_BIT
 						| IRQ_BAT_HOT_COLD_SOFT_BIT
 						| IRQ_BAT_HOT_COLD_HARD_BIT);
 	if (rc < 0)
@@ -4531,6 +5378,8 @@ static int smb1360_suspend(struct device *dev)
 		pr_err("Couldn't set irq2_cfg rc=%d\n", rc);
 
 	rc = smb1360_write(chip, IRQ3_CFG_REG, IRQ3_SOC_FULL_BIT
+					//ZTE-MODIFY by DingXuehua, add IRQ3_SOC_CHANGE_BIT
+					//| IRQ3_SOC_CHANGE_BIT
 					| IRQ3_SOC_MIN_BIT
 					| IRQ3_SOC_EMPTY_BIT);
 	if (rc < 0)
@@ -4539,6 +5388,8 @@ static int smb1360_suspend(struct device *dev)
 	mutex_lock(&chip->irq_complete);
 	chip->resume_completed = false;
 	mutex_unlock(&chip->irq_complete);
+
+	pr_debug("Suspend Complete!!\n");
 
 	return 0;
 }
@@ -4552,6 +5403,9 @@ static int smb1360_suspend_noirq(struct device *dev)
 		pr_err_ratelimited("Aborting suspend, an interrupt was detected while suspending\n");
 		return -EBUSY;
 	}
+
+	pr_debug("Suspend-noirq Complete!!\n");
+
 	return 0;
 }
 

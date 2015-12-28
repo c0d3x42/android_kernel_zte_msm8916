@@ -1725,6 +1725,10 @@ static int __mdss_mdp_overlay_release_all(struct msm_fb_data_type *mfd,
 		mdss_mdp_overlay_release(mfd, unset_ndx);
 	}
 	mutex_unlock(&mdp5_data->ov_lock);
+//ftm shutdown flash bule screen of qualcomm patch recovery start yujinahua
+	if (cnt)
+		mfd->mdp.kickoff_fnc(mfd, NULL);
+//ftm shutdown flash bule screen of qualcomm patch recovery end yujinahua
 
 	list_for_each_entry_safe(rot, tmp, &mdp5_data->rot_proc_list, list) {
 		if (rot->pid == pid) {
@@ -1733,8 +1737,10 @@ static int __mdss_mdp_overlay_release_all(struct msm_fb_data_type *mfd,
 			mdss_mdp_rotator_release(rot);
 		}
 	}
-
-	return cnt;
+//ftm shutdown flash bule screen of qualcomm patch recovery start yujinahua
+        //return cnt;
+	return 0;
+//ftm shutdown flash bule screen of qualcomm patch recovery end yujinahua
 }
 
 static int mdss_mdp_overlay_play_wait(struct msm_fb_data_type *mfd,

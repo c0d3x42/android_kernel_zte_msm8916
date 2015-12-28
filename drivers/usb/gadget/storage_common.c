@@ -96,6 +96,12 @@
 /* Length of a SCSI Command Data Block */
 #define MAX_COMMAND_SIZE	16
 
+//zz ztebsp zhangjing add for mac cdrom, ++,20120604
+#if 1
+#define SC_GET_CONFIGRATION    0x46
+#define SC_SET_CD_SPEED	           0xbb	
+#endif
+//zz ztebsp zhangjing add for mac cdrom, --,20120604
 /* SCSI Sense Key/Additional Sense Code/ASC Qualifier values */
 #define SS_NO_SENSE				0
 #define SS_COMMUNICATION_FAILURE		0x040800
@@ -706,6 +712,7 @@ static ssize_t fsg_store_file(struct device *dev, struct device_attribute *attr,
 	struct rw_semaphore	*filesem = dev_get_drvdata(dev);
 	int		rc = 0;
 
+	printk("fsg_store_file(): buf = %s count = %d\n", buf, (int)count);
 
 #if !defined(CONFIG_USB_G_ANDROID)
 	/* disabled in android because we need to allow closing the backing file
@@ -723,13 +730,19 @@ static ssize_t fsg_store_file(struct device *dev, struct device_attribute *attr,
 
 	/* Load new medium */
 	down_write(filesem);
-	if (count > 0 && buf[0]) {
+	if (count == 1 && buf[0] == ' ' && fsg_lun_is_open(curlun)) {
+		printk("fsg_store_file(): close file, input one space\n");
+		fsg_lun_close(curlun);
+		curlun->unit_attention_data = SS_MEDIUM_NOT_PRESENT;
+	} else if (count > 0 && buf[0]) {
+		printk("fsg_store_file(): open new file\n");
 		/* fsg_lun_open() will close existing file if any. */
 		rc = fsg_lun_open(curlun, buf);
 		if (rc == 0)
 			curlun->unit_attention_data =
 					SS_NOT_READY_TO_READY_TRANSITION;
 	} else if (fsg_lun_is_open(curlun)) {
+		printk("fsg_store_file(): close file\n");
 		fsg_lun_close(curlun);
 		curlun->unit_attention_data = SS_MEDIUM_NOT_PRESENT;
 	}

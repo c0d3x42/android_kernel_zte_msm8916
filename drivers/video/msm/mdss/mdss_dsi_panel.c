@@ -23,7 +23,9 @@
 #include <linux/err.h>
 
 #include "mdss_dsi.h"
-
+//lixuetao add for read panel info
+#include <linux/proc_fs.h>
+//end
 #define DT_CMD_HDR 6
 
 /* NT35596 panel specific status variables */
@@ -35,6 +37,77 @@
 #define MIN_REFRESH_RATE 30
 
 DEFINE_LED_TRIGGER(bl_led_trigger);
+
+#if defined(CONFIG_TPS65132_LCM_VSP)//ZTE_FEATURE_LCD_VSP_VSN_TPS65132B_V55
+extern int tps65132_set_vsp_vsn_58v(void);
+extern int ti65132b_true;
+extern int ti65132b_probe;
+int lcm_vsp_vsn_58v = 0x0;
+static int First_show = 0x1;
+#endif
+
+//lixuetao add for read panel info
+static struct proc_dir_entry * d_entry;
+static char  module_name[50]={"0"};
+
+static int mdss_dsi_panel_lcd_proc_show(struct seq_file *m, void *v)
+{
+	#if defined(CONFIG_TPS65132_LCM_VSP)//ZTE_FEATURE_LCD_VSP_VSN_TPS65132B_V55
+	if(First_show==0x1)
+	{
+		if(ti65132b_true==1)
+		{
+			strcat(module_name, "-TI");
+		
+		}
+		else
+		{
+			strcat(module_name, "-KTD");
+		}
+		First_show=0x0;
+	}
+	#endif
+	seq_printf(m, "%s\n", module_name);
+	return 0;
+}
+
+static int mdss_dsi_panel_lcd_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, mdss_dsi_panel_lcd_proc_show, NULL);
+}
+
+static const struct file_operations mdss_dsi_panel_lcd_proc_fops = {
+	.owner		= THIS_MODULE,
+	.open		= mdss_dsi_panel_lcd_proc_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+void  mdss_dsi_panel_lcd_proc(struct device_node *node)
+{		
+    const char * panel_name ;		
+	d_entry = proc_create_data("msm_lcd", 0, NULL, &mdss_dsi_panel_lcd_proc_fops, NULL);
+	
+	panel_name = of_get_property(node,	"zte,lcd-proc-panel-name", NULL);
+	if (!panel_name)
+	{		
+	    pr_info("LCD %s:%d, panel name not found!\n",__func__, __LINE__);		
+		strcpy(module_name,"0");	
+	}
+	else
+	{		
+	    pr_info("LCD%s: Panel Name = %s\n", __func__, panel_name);		
+	#if defined(CONFIG_TPS65132_LCM_VSP)//ZTE_FEATURE_LCD_VSP_VSN_TPS65132B_V55
+		if(!strcmp(panel_name, "ztetm(r63315+tm)_1080*1920-5.5Inch"))
+		{
+			lcm_vsp_vsn_58v=0x1;
+		}
+	#endif
+		strcpy(module_name,panel_name);
+	}
+}
+//lixuetao add for read panel info end
 
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
@@ -174,13 +247,31 @@ static void mdss_dsi_panel_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl,
 
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
 }
-
+//zhangjian modify
+#if 1 //modify by yujianhua for t60 screen flash
 static char led_pwm1[2] = {0x51, 0x0};	/* DTYPE_DCS_WRITE1 */
 static struct dsi_cmd_desc backlight_cmd = {
 	{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(led_pwm1)},
 	led_pwm1
 };
+#else
+static char CABC_0x51_off[2] = {0x51, 0x00};
+static char CABC_0x53_off[2] = {0x53, 0x00};	
+static struct dsi_cmd_desc display_off_CABC_backlight_cmds[] = 
+{
+	{{DTYPE_DCS_LWRITE, 1, 0, 0, 1, sizeof(CABC_0x51_off)}, CABC_0x51_off},
+	{{DTYPE_DCS_LWRITE, 1, 0, 0, 1, sizeof(CABC_0x53_off)}, CABC_0x53_off }
+};
 
+static char CABC_0x51[2]={0x51,0xff};
+static char CABC_0x53[2]={0x53,0x2C};
+static struct dsi_cmd_desc CABC_backlight_cmds[] = 
+{
+	{{DTYPE_DCS_LWRITE, 1, 0, 0, 1, sizeof(CABC_0x51)}, CABC_0x51},
+	{{DTYPE_DCS_LWRITE, 1, 0, 0, 1, sizeof(CABC_0x53)}, CABC_0x53}
+};
+#endif
+//modify end
 static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 {
 	struct dcs_cmd_req cmdreq;
@@ -192,13 +283,33 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 			return;
 	}
 
+	//zhangjian add
+	//level = (level*80)/100;
+	if ( (level < 10) && (level != 0))    
+	level = 10;
+	//add end
 	pr_debug("%s: level=%d\n", __func__, level);
-
+	//zhangjian modify 
+	#if 1 //modify by yujianhua for t60 screen flash	
 	led_pwm1[1] = (unsigned char)level;
 
 	memset(&cmdreq, 0, sizeof(cmdreq));
 	cmdreq.cmds = &backlight_cmd;
 	cmdreq.cmds_cnt = 1;
+	#else	
+	memset(&cmdreq, 0, sizeof(cmdreq));
+	if (level == 0)
+	{ 
+		cmdreq.cmds = display_off_CABC_backlight_cmds;
+	}
+	else
+	{
+		CABC_0x51[1] = (unsigned char)level;
+		cmdreq.cmds = CABC_backlight_cmds;
+	}
+	cmdreq.cmds_cnt = 2;
+	#endif
+	//end modify
 	cmdreq.flags = CMD_REQ_COMMIT | CMD_CLK_CTRL;
 	cmdreq.rlen = 0;
 	cmdreq.cb = NULL;
@@ -256,11 +367,194 @@ disp_en_gpio_err:
 	return rc;
 }
 
+//zhangjian add for 8939
+#ifdef CONFIG_ZTE_LCD_P8939
+int mdss_dsi_panel_power_enable(struct mdss_panel_data *pdata, int enable)
+{
+    struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+	struct mdss_panel_info *pinfo = NULL;
+	int rc = 0;
+    int gpio_value = 1;
+    
+	if (pdata == NULL) {
+		pr_err("%s: Invalid input data\n", __func__);
+		return -EINVAL;
+	}
+
+	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
+				panel_data);
+
+	pr_err("%s: enable = %d\n", __func__, enable);
+	pinfo = &(ctrl_pdata->panel_data.panel_info);
+
+	if (enable) 
+	{    
+	     //vdddc vddio debug gpio not specified
+	    #if !defined(CONFIG_TPS65132_LCM_VSP)//!defined(ZTE_FEATURE_LCD_1080P_VIDEO_V55)
+            if (gpio_is_valid(ctrl_pdata->disp_vdddc_en_gpio)) {
+        		rc = gpio_request(ctrl_pdata->disp_vdddc_en_gpio,
+        						"disp_vdddc_en_gpio");
+        		if (rc) {
+				pr_err("request disp_vdddc_en_gpio failed, rc=%d\n",rc);
+        		}
+                gpio_value = gpio_get_value((unsigned int)(ctrl_pdata->disp_vdddc_en_gpio));                
+                gpio_direction_output(ctrl_pdata->disp_vdddc_en_gpio, gpio_value);//config gpio to output
+                //pr_err("%s: enable disp_vdddc_en_gpio \n", __func__);
+                gpio_set_value((ctrl_pdata->disp_vdddc_en_gpio), 1);
+                msleep(5);
+        	}
+
+            if (gpio_is_valid(ctrl_pdata->disp_vddio_en_gpio)) {
+			rc = gpio_request(ctrl_pdata->disp_vddio_en_gpio,"disp_vddio_en_gpio");
+        		if (rc) {
+				pr_err("request disp_vddio_en_gpio failed, rc=%d\n",rc);
+        		}
+                gpio_value = gpio_get_value((unsigned int)(ctrl_pdata->disp_vddio_en_gpio));                
+                gpio_direction_output(ctrl_pdata->disp_vddio_en_gpio, gpio_value);//config gpio to output
+                //pr_err("%s: enable disp_vdddc_en_gpio \n", __func__);
+                gpio_set_value((ctrl_pdata->disp_vddio_en_gpio), 1);
+                msleep(5);
+        	}
+
+            if (gpio_is_valid(ctrl_pdata->disp_debug_mode_en_gpio)) {
+			rc = gpio_request(ctrl_pdata->disp_debug_mode_en_gpio,"disp_debug_mode_en_gpio");
+        		if (rc) {
+				pr_err("request disp_debug_mode_en_gpio failed, rc=%d\n",rc);
+        		}
+                gpio_value = gpio_get_value((unsigned int)(ctrl_pdata->disp_debug_mode_en_gpio));
+                gpio_direction_output(ctrl_pdata->disp_debug_mode_en_gpio, gpio_value);//config gpio to output
+                //pr_err("%s: enable disp_debug_mode_en_gpio \n", __func__);
+                gpio_set_value((ctrl_pdata->disp_debug_mode_en_gpio), 1);
+                msleep(5);
+        	}
+	   #endif
+       // zte lixuetao add for P839T60
+	   #ifdef CONFIG_P839T60_LCD_DRIVER
+	   return rc;
+	   #endif
+		if (gpio_is_valid(ctrl_pdata->disp_vsp_gpio)) {
+			rc = gpio_request(ctrl_pdata->disp_vsp_gpio,"disp_vsp_gpio");
+			if (rc) {
+				pr_err("request disp_vsp_gpio failed, rc=%d\n",rc);
+			}
+			gpio_value = gpio_get_value((unsigned int)(ctrl_pdata->disp_vsp_gpio));                
+			gpio_direction_output(ctrl_pdata->disp_vsp_gpio, gpio_value);//config gpio to output
+			//pr_err("%s: enable disp_vsp_gpio \n", __func__);
+			gpio_set_value((ctrl_pdata->disp_vsp_gpio), 1);
+			msleep(5);
+		}
+		if (gpio_is_valid(ctrl_pdata->disp_vsn_gpio)) {
+			rc = gpio_request(ctrl_pdata->disp_vsn_gpio,"disp_vsn_gpio");
+			if (rc) {
+				pr_err("request disp_vsn_gpio failed, rc=%d\n",rc);
+			}
+			gpio_value = gpio_get_value((unsigned int)(ctrl_pdata->disp_vsn_gpio));                
+			gpio_direction_output(ctrl_pdata->disp_vsn_gpio, gpio_value);//config gpio to output
+			//pr_err("%s: enable disp_vsn_gpio \n", __func__);
+			gpio_set_value((ctrl_pdata->disp_vsn_gpio), 1);
+			msleep(5);
+		}		
+		#if defined(CONFIG_TPS65132_LCM_VSP)//ZTE_FEATURE_LCD_VSP_VSN_TPS65132B_V55
+		if(lcm_vsp_vsn_58v==0x1)
+		{
+			if((ti65132b_probe==0x1)&&(ti65132b_true==0x1))
+			tps65132_set_vsp_vsn_58v();
+
+		}
+		#endif
+		//vdddc vddio debug gpio not specified
+		#if !defined(CONFIG_TPS65132_LCM_VSP)//!defined(ZTE_FEATURE_LCD_1080P_VIDEO_V55)
+        	gpio_free(ctrl_pdata->disp_vddio_en_gpio);
+            gpio_free(ctrl_pdata->disp_vdddc_en_gpio);
+            gpio_free(ctrl_pdata->disp_debug_mode_en_gpio);
+		#endif
+		gpio_free(ctrl_pdata->disp_vsp_gpio);
+		gpio_free(ctrl_pdata->disp_vsn_gpio);
+        }   
+	else 
+	{		
+	 #ifdef CONFIG_P839T60_LCD_DRIVER	      
+	  return rc;
+	  #endif
+		//vdddc vddio debug gpio not specified
+	       #if !defined(CONFIG_TPS65132_LCM_VSP)//!defined(ZTE_FEATURE_LCD_1080P_VIDEO_V55)
+		if (gpio_is_valid(ctrl_pdata->disp_vdddc_en_gpio)) {
+			rc = gpio_request(ctrl_pdata->disp_vdddc_en_gpio,
+							"disp_vdddc_en_gpio");
+			if (rc) {
+				pr_err("request disp_vdddc_en_gpio failed, rc=%d\n",rc);
+			}
+			gpio_value = gpio_get_value((unsigned int)(ctrl_pdata->disp_vdddc_en_gpio));                
+			gpio_direction_output(ctrl_pdata->disp_vdddc_en_gpio, gpio_value);//config gpio to output
+			//pr_err("%s: disable disp_vdddc_en_gpio \n", __func__);
+			gpio_set_value((ctrl_pdata->disp_vdddc_en_gpio), 0);
+			msleep(5);
+		}
+
+		if (gpio_is_valid(ctrl_pdata->disp_vddio_en_gpio)) {
+			rc = gpio_request(ctrl_pdata->disp_vddio_en_gpio,"disp_vddio_en_gpio");
+			if (rc) {
+				pr_err("request disp_vddio_en_gpio failed, rc=%d\n",rc);
+			}
+			gpio_value = gpio_get_value((unsigned int)(ctrl_pdata->disp_vddio_en_gpio));                
+			gpio_direction_output(ctrl_pdata->disp_vddio_en_gpio, gpio_value);//config gpio to output
+			//pr_err("%s: disable disp_vdddc_en_gpio \n", __func__);
+			gpio_set_value((ctrl_pdata->disp_vddio_en_gpio), 0);
+			msleep(5);
+		}
+        
+		if (gpio_is_valid(ctrl_pdata->disp_debug_mode_en_gpio)) {
+			rc = gpio_request(ctrl_pdata->disp_debug_mode_en_gpio,"disp_debug_mode_en_gpio");
+			if (rc) {
+				pr_err("request disp_debug_mode_en_gpio failed, rc=%d\n",rc);
+			}
+			gpio_value = gpio_get_value((unsigned int)(ctrl_pdata->disp_debug_mode_en_gpio));
+			gpio_direction_output(ctrl_pdata->disp_debug_mode_en_gpio, gpio_value);//config gpio to output
+			//pr_err("%s: disable disp_debug_mode_en_gpio \n", __func__);
+			gpio_set_value((ctrl_pdata->disp_debug_mode_en_gpio),0);
+			msleep(2);
+		}
+		#endif
+		if (gpio_is_valid(ctrl_pdata->disp_vsn_gpio)) {
+			rc = gpio_request(ctrl_pdata->disp_vsn_gpio,"disp_vsn_gpio");
+			if (rc) {
+				pr_err("request disp_vsn_gpio failed, rc=%d\n",rc);
+			}
+			gpio_value = gpio_get_value((unsigned int)(ctrl_pdata->disp_vsn_gpio));                
+			gpio_direction_output(ctrl_pdata->disp_vsn_gpio, gpio_value);//config gpio to output
+			//pr_err("%s: disable disp_vsn_gpio \n", __func__);
+			gpio_set_value((ctrl_pdata->disp_vsn_gpio), 0);
+			msleep(5);
+		}
+		if (gpio_is_valid(ctrl_pdata->disp_vsp_gpio)) {
+			rc = gpio_request(ctrl_pdata->disp_vsp_gpio,"disp_vsp_gpio");
+			if (rc) {
+				pr_err("request disp_vsp_gpio failed, rc=%d\n",rc);
+			}
+			gpio_value = gpio_get_value((unsigned int)(ctrl_pdata->disp_vsp_gpio));                
+			gpio_direction_output(ctrl_pdata->disp_vsp_gpio, gpio_value);//config gpio to output
+			//pr_err("%s: disable disp_vsp_gpio \n", __func__);
+			gpio_set_value((ctrl_pdata->disp_vsp_gpio), 0);
+			msleep(5);
+		}
+              //vdddc vddio debug gpio not specified
+              #if !defined(CONFIG_TPS65132_LCM_VSP)//!defined(ZTE_FEATURE_LCD_1080P_VIDEO_V55)
+		gpio_free(ctrl_pdata->disp_vddio_en_gpio);
+		gpio_free(ctrl_pdata->disp_vdddc_en_gpio);
+		gpio_free(ctrl_pdata->disp_debug_mode_en_gpio);
+		#endif
+		gpio_free(ctrl_pdata->disp_vsp_gpio);
+		gpio_free(ctrl_pdata->disp_vsn_gpio);
+    }    
+	return rc;
+}
+#endif 
+//add end
 int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_panel_info *pinfo = NULL;
-	int i, rc = 0;
+	int rc = 0;
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -294,17 +588,28 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
 				gpio_set_value((ctrl_pdata->disp_en_gpio), 1);
 
+			//lixuetao modify for reset timming
+			/*  
 			for (i = 0; i < pdata->panel_info.rst_seq_len; ++i) {
 				gpio_set_value((ctrl_pdata->rst_gpio),
 					pdata->panel_info.rst_seq[i]);
 				if (pdata->panel_info.rst_seq[++i])
 					usleep(pinfo->rst_seq[i] * 1000);
 			}
+			*/
+			//lixuetao code end
 
 			if (gpio_is_valid(ctrl_pdata->bklt_en_gpio))
 				gpio_set_value((ctrl_pdata->bklt_en_gpio), 1);
 		}
 
+
+		//zhangjian add for 8939
+        #ifdef CONFIG_ZTE_LCD_P8939
+       // gpio_free(ctrl_pdata->rst_gpio);//lixuetao modify
+		#endif
+        //zhangjian add end
+        
 		if (gpio_is_valid(ctrl_pdata->mode_gpio)) {
 			if (pinfo->mode_gpio_state == MODE_GPIO_HIGH)
 				gpio_set_value((ctrl_pdata->mode_gpio), 1);
@@ -326,8 +631,12 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
 			gpio_free(ctrl_pdata->disp_en_gpio);
 		}
+		// zhangjian modify for 8939 LCD
+        //#ifndef CONFIG_ZTE_LCD_P8939 
 		gpio_set_value((ctrl_pdata->rst_gpio), 0);
 		gpio_free(ctrl_pdata->rst_gpio);
+        //#endif
+		//modify end
 		if (gpio_is_valid(ctrl_pdata->mode_gpio))
 			gpio_free(ctrl_pdata->mode_gpio);
 	}
@@ -540,11 +849,21 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_dsi_ctrl_pdata *sctrl = NULL;
+    //add by guohaijing start
+    static u32 bl_level_last = 0x0;
+    //add by guohaijing end
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return;
 	}
+
+    //add by guohaijing start
+    if ((bl_level_last == 0) || (bl_level == 0)) {
+        printk("mdss_dsi_panel_bl_ctrl, bl_level=%d\n", bl_level);
+   	}
+	bl_level_last=bl_level;
+    //add by guohaijing end
 
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
@@ -600,6 +919,7 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
 	struct mdss_panel_info *pinfo;
+	int i;
 
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
@@ -611,6 +931,15 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 				panel_data);
 
 	pr_debug("%s: ctrl=%p ndx=%d\n", __func__, ctrl, ctrl->ndx);
+	//add by lixuetao for lcd timming
+	for (i = 0; i < pdata->panel_info.rst_seq_len; ++i) {		
+			gpio_set_value((ctrl->rst_gpio),
+			pdata->panel_info.rst_seq[i]);
+			if (pdata->panel_info.rst_seq[++i])
+			   usleep(pinfo->rst_seq[i] * 1000);
+
+	}
+	//end by lixuetao
 
 	if (pinfo->dcs_cmd_by_left) {
 		if (ctrl->ndx != DSI_CTRL_LEFT)
@@ -1711,6 +2040,7 @@ int mdss_dsi_panel_init(struct device_node *node,
 	ctrl_pdata->low_power_config = mdss_dsi_panel_low_power_config;
 	ctrl_pdata->panel_data.set_backlight = mdss_dsi_panel_bl_ctrl;
 	ctrl_pdata->switch_mode = mdss_dsi_panel_switch_mode;
-
+	//lixuetao add for read panel info
+	mdss_dsi_panel_lcd_proc(node);
 	return 0;
 }

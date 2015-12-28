@@ -100,6 +100,15 @@
 			reg = <0x0 0x83000000 0x0 0x2000000>;
 			label = "cont_splash_mem";
 		};
+
+              /* ZSW Added: define RAM Console Heap */
+		pstore_reserve_mem: pstore_reserve_mem_region@0 {
+                    linux,reserve-contiguous-region;
+                    linux,reserve-region;
+                    linux,remove-completely;
+                    reg = <0x0 0x85000000 0x0 0x00100000>; 
+                    label = "pstore_reserve_mem";
+               };
 	};
 
 	soc: soc { };
@@ -211,8 +220,8 @@
 		reg = <0xb017000 0x1000>;
 		reg-names = "wdt-base";
 		interrupts = <0 3 0>, <0 4 0>;
-		qcom,bark-time = <11000>;
-		qcom,pet-time = <10000>;
+		qcom,bark-time = <20000>;
+		qcom,pet-time = <15000>;
 		qcom,ipi-ping;
 	};
 
@@ -974,7 +983,7 @@
 		      <0x7884000 0x23000>;
 		interrupt-names = "qup_irq", "bam_irq";
 		interrupts = <0 99 0>, <0 238 0>;
-		qcom,clk-freq-out = <100000>;
+		qcom,clk-freq-out = <400000>;
 		qcom,clk-freq-in  = <19200000>;
 		clock-names = "iface_clk", "core_clk";
 		clocks = <&clock_gcc clk_gcc_blsp1_ahb_clk>,

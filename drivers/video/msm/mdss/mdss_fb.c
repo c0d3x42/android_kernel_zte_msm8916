@@ -1093,6 +1093,7 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 	struct mdss_panel_data *pdata;
 	u32 temp = bkl_lvl;
 	bool bl_notify_needed = false;
+	u32 bkl_lvl_new = bkl_lvl;
 
 	/* todo: temporary workaround to support doze mode */
 	if ((bkl_lvl == 0) && (mfd->doze_mode)) {
@@ -1100,11 +1101,19 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 		mfd->unset_bl_level = 0;
 		return;
 	}
+    //zte add for when bkl_lvl=1, the backlight off.
+	if(bkl_lvl==1)
+	{
+		bkl_lvl_new = bkl_lvl+1;
+		temp=bkl_lvl_new;
+	}
+	//zte code end
 
 	if ((((mdss_fb_is_power_off(mfd) && mfd->dcm_state != DCM_ENTER)
 		|| !mfd->bl_updated) && !IS_CALIB_MODE_BL(mfd)) ||
 		mfd->panel_info->cont_splash_enabled) {
-		mfd->unset_bl_level = bkl_lvl;
+		//mfd->unset_bl_level = bkl_lvl;
+		mfd->unset_bl_level = bkl_lvl_new;
 		return;
 	} else {
 		mfd->unset_bl_level = 0;
@@ -1127,11 +1136,11 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 		 * backlight has been set to the scaled value.
 		 */
 		if (mfd->bl_level_scaled == temp) {
-			mfd->bl_level = bkl_lvl;
+			mfd->bl_level = bkl_lvl_new;
 		} else {
 			pr_debug("backlight sent to panel :%d\n", temp);
 			pdata->set_backlight(pdata, temp);
-			mfd->bl_level = bkl_lvl;
+			mfd->bl_level = bkl_lvl_new;
 			mfd->bl_level_scaled = temp;
 			bl_notify_needed = true;
 		}
@@ -2203,6 +2212,11 @@ static int mdss_fb_release_all(struct fb_info *info, bool release_all)
 			pm_runtime_put(info->dev);
 		} while (release_all && pinfo->ref_cnt);
 
+//ftm shutdown flash bule screen of qualcomm patch recovery start yujinahua
+		/* we need to stop display thread before release */
+		if (release_all && mfd->disp_thread)
+			mdss_fb_stop_disp_thread(mfd);
+//ftm shutdown flash bule screen of qualcomm patch recovery end yujinahua
 		if (pinfo->ref_cnt == 0) {
 			list_del(&pinfo->list);
 			kfree(pinfo);
@@ -2232,12 +2246,34 @@ static int mdss_fb_release_all(struct fb_info *info, bool release_all)
 				task->comm, mfd->ref_cnt);
 		}
 	}
+//ftm shutdown flash bule screen of qualcomm patch recovery start yujinahua
+	if (release_needed) {
+		pr_debug("current process=%s pid=%d known pid=%d mfd->ref=%d\n",
+			task->comm, current->tgid, pid, mfd->ref_cnt);
 
-	if (!mfd->ref_cnt || release_all) {
+		if (mfd->mdp.release_fnc) {
+			ret = mfd->mdp.release_fnc(mfd, false, pid);
+			if (ret)
+				pr_err("error releasing fb%d for current pid=%d known pid=%d\n",
+					mfd->index, current->tgid, pid);
+		}
+	} else if (release_all && mfd->ref_cnt) {
+		pr_err("reference count mismatch with proc list entries\n");
+	}
+
+	if (!mfd->ref_cnt) {
+		if (mfd->mdp.release_fnc) {
+			ret = mfd->mdp.release_fnc(mfd, true, pid);
+			if (ret)
+				pr_err("error fb%d release current process=%s pid=%d known pid=%d\n",
+				    mfd->index, task->comm, current->tgid, pid);
+		}
+
+	//if (!mfd->ref_cnt || release_all) {
 		/* resources (if any) will be released during blank */
-		if (mfd->mdp.release_fnc)
-			mfd->mdp.release_fnc(mfd, true, pid);
-
+		//if (mfd->mdp.release_fnc)
+			//mfd->mdp.release_fnc(mfd, true, pid);
+//ftm shutdown flash bule screen of qualcomm patch recovery end yujinahua
 		if (mfd->fb_ion_handle)
 			mdss_fb_free_fb_ion_memory(mfd);
 
@@ -2256,17 +2292,19 @@ static int mdss_fb_release_all(struct fb_info *info, bool release_all)
 			return ret;
 		}
 		atomic_set(&mfd->ioctl_ref_cnt, 0);
-	} else if (release_needed) {
-		pr_debug("current process=%s pid=%d known pid=%d mfd->ref=%d\n",
-			task->comm, current->tgid, pid, mfd->ref_cnt);
+//ftm shutdown flash bule screen of qualcomm patch recovery start yujinahua
+	//} else if (release_needed) {
+		//pr_debug("current process=%s pid=%d known pid=%d mfd->ref=%d\n",
+			//task->comm, current->tgid, pid, mfd->ref_cnt);
 
-		if (mfd->mdp.release_fnc) {
-			ret = mfd->mdp.release_fnc(mfd, false, pid);
+		//if (mfd->mdp.release_fnc) {
+			//ret = mfd->mdp.release_fnc(mfd, false, pid);
 
 			/* display commit is needed to release resources */
-			if (ret)
-				mdss_fb_pan_display(&mfd->fbi->var, mfd->fbi);
-		}
+			//if (ret)
+				//mdss_fb_pan_display(&mfd->fbi->var, mfd->fbi);
+		//}
+//ftm shutdown flash bule screen of qualcomm patch recovery end yujinahua
 	}
 
 	return ret;

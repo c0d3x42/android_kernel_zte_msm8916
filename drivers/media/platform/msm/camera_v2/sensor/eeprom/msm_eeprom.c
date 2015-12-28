@@ -25,6 +25,8 @@ DEFINE_MSM_MUTEX(msm_eeprom_mutex);
 #ifdef CONFIG_COMPAT
 static struct v4l2_file_operations msm_eeprom_v4l2_subdev_fops;
 #endif
+
+extern void msm_sensorinfo_set_back_sensor_module_id(uint8_t module_id, uint8_t eeprom_id);
 /**
   * msm_eeprom_verify_sum - verify crc32 checksum
   * @mem:	data buffer
@@ -327,6 +329,7 @@ static int read_eeprom_memory(struct msm_eeprom_ctrl_t *e_ctrl,
 		}
 
 		if (emap[j].mem.valid_size) {
+			#if 0
 			e_ctrl->i2c_client.addr_type = emap[j].mem.addr_t;
 			rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_read_seq(
 				&(e_ctrl->i2c_client), emap[j].mem.addr,
@@ -336,6 +339,31 @@ static int read_eeprom_memory(struct msm_eeprom_ctrl_t *e_ctrl,
 				return rc;
 			}
 			memptr += emap[j].mem.valid_size;
+			#else
+			if( strcmp("zte_gt24c16",eb_info->eeprom_name) == 0
+				|| strcmp("zte_gt24c16_imx214",eb_info->eeprom_name) == 0){
+			   e_ctrl->i2c_client.cci_client->sid = emap[j].mem.addr;
+			   e_ctrl->i2c_client.addr_type = emap[j].mem.addr_t;
+			   rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_read_seq(
+				  &(e_ctrl->i2c_client), 0,
+				  memptr, emap[j].mem.valid_size);
+			   if (rc < 0) {
+				  pr_err("%s: read failed\n", __func__);
+				  return rc;
+			}
+			  memptr += emap[j].mem.valid_size;
+			}else{
+			   e_ctrl->i2c_client.addr_type = emap[j].mem.addr_t;
+			   rc = e_ctrl->i2c_client.i2c_func_tbl->i2c_read_seq(
+				  &(e_ctrl->i2c_client), emap[j].mem.addr,
+				  memptr, emap[j].mem.valid_size);
+			   if (rc < 0) {
+				  pr_err("%s: read failed\n", __func__);
+				  return rc;
+			}
+			  memptr += emap[j].mem.valid_size;
+		  }
+		  #endif
 		}
 		if (emap[j].pageen.valid_size) {
 			e_ctrl->i2c_client.addr_type = emap[j].pageen.addr_t;
@@ -1016,7 +1044,7 @@ static long msm_eeprom_subdev_fops_ioctl32(struct file *file, unsigned int cmd,
 static int msm_eeprom_platform_probe(struct platform_device *pdev)
 {
 	int rc = 0;
-	int j = 0;
+	//int j = 0;
 	uint32_t temp;
 
 	struct msm_camera_cci_client *cci_client = NULL;
@@ -1140,12 +1168,21 @@ static int msm_eeprom_platform_probe(struct platform_device *pdev)
 		pr_err("%s read_eeprom_memory failed\n", __func__);
 		goto power_down;
 	}
+	#if 0
 	for (j = 0; j < e_ctrl->cal_data.num_data; j++)
 		CDBG("memory_data[%d] = 0x%X\n", j,
 			e_ctrl->cal_data.mapdata[j]);
-
+    #endif
 	e_ctrl->is_supported |= msm_eeprom_match_crc(&e_ctrl->cal_data);
 
+	if( !(strcmp("zte_gt24c16",e_ctrl->eboard_info->eeprom_name))
+		|| !(strcmp("zte_gt24c16_imx214",e_ctrl->eboard_info->eeprom_name))){
+        msm_sensorinfo_set_back_sensor_module_id(e_ctrl->cal_data.mapdata[0],8);
+	}else{
+		msm_sensorinfo_set_back_sensor_module_id(e_ctrl->cal_data.mapdata[2],16);
+	}
+
+	
 	rc = msm_camera_power_down(power_info, e_ctrl->eeprom_device_type,
 		&e_ctrl->i2c_client);
 	if (rc) {

@@ -1710,6 +1710,7 @@ static int msm_otg_notify_chg_type(struct msm_otg *motg)
 	}
 
 	pr_debug("setting usb power supply type %d\n", charger_type);
+	pr_err("setting usb power supply type motg->chg_type = %d,charger_type = %d \n",motg->chg_type,charger_type);
 	power_supply_set_supply_type(psy, charger_type);
 	return 0;
 }
@@ -1720,7 +1721,7 @@ static int msm_otg_notify_power_supply(struct msm_otg *motg, unsigned mA)
 		dev_dbg(motg->phy.dev, "no usb power supply registered\n");
 		goto psy_error;
 	}
-
+       pr_err("msm_otg_notify_power_supply,motg->cur_power=%d,mA = %d\n", motg->cur_power,mA);
 	if (motg->cur_power == 0 && mA > 2) {
 		/* Enable charging */
 		if (power_supply_set_online(psy, true))
@@ -1785,13 +1786,16 @@ static void msm_otg_notify_charger(struct msm_otg *motg, unsigned mA)
 	 * This condition will be true when usb cable is disconnected
 	 * during bootup before charger detection mechanism starts.
 	 */
+
+	dev_info(motg->phy.dev, "msm_otg_notify_charger motg->online = %d, motg->cur_power = %d, mA = %d\n",motg->online,motg->cur_power,mA);
+	
 	if (motg->online && motg->cur_power == 0 && mA == 0)
 		msm_otg_set_online_status(motg);
 
 	if (motg->cur_power == mA)
 		return;
 
-	dev_info(motg->phy.dev, "Avail curr from USB = %u\n", mA);
+	dev_info(motg->phy.dev, "Avail curr from USB = %u,motg->online = %d\n", mA,motg->online);
 
 	/*
 	 *  Use Power Supply API if supported, otherwise fallback
@@ -1802,7 +1806,9 @@ static void msm_otg_notify_charger(struct msm_otg *motg, unsigned mA)
 
 	motg->cur_power = mA;
 }
-
+//zz
+static int skip_invalid_chg_work = 0;
+//zz
 static int msm_otg_set_power(struct usb_phy *phy, unsigned mA)
 {
 	struct msm_otg *motg = container_of(phy, struct msm_otg, phy);
@@ -1814,9 +1820,18 @@ static int msm_otg_set_power(struct usb_phy *phy, unsigned mA)
 	 * IDEV_CHG can be drawn irrespective of suspend/un-configured
 	 * states when CDP/ACA is connected.
 	 */
-	if (motg->chg_type == USB_SDP_CHARGER)
+pr_err("msm_otg_set_power motg->chg_type = %d,mA = %d \n",motg->chg_type,mA);
+	if (motg->chg_type == USB_SDP_CHARGER){
+//zz
+		pr_info("usb %s mA:%d\n",__func__,mA);
+		/*wall charger in which D+/D- disconnected 
+			would be recognized as usb cable, 2/7*/
+		skip_invalid_chg_work = 1;
+		//cancel_delayed_work_sync(&motg->invalid_chg_work);
+		/*end*/
 		msm_otg_notify_charger(motg, mA);
-
+		}
+//zz
 	return 0;
 }
 
@@ -2820,6 +2835,20 @@ static void msm_chg_detect_work(struct work_struct *w)
 
 	queue_delayed_work(system_nrt_wq, &motg->chg_work, delay);
 }
+//zz
+/*wall charger in which D+/D- disconnected would be recognized as usb cable 3/7*/
+static void msm_invalid_chg_work(struct work_struct *w)
+{
+	struct msm_otg *motg = container_of(w, struct msm_otg, invalid_chg_work.work);	
+	if(skip_invalid_chg_work){
+		skip_invalid_chg_work = 0;
+		return;
+		}
+	printk(KERN_ERR"msm_otg : %s, %d\n",__FUNCTION__,__LINE__);
+	msm_otg_notify_charger(motg, IDEV_CHG_MIN+1); //>500mA
+}
+/*end*/
+//zz
 
 #define VBUS_INIT_TIMEOUT	msecs_to_jiffies(5000)
 
@@ -3047,6 +3076,18 @@ static void msm_otg_sm_work(struct work_struct *w)
 						OTG_STATE_B_PERIPHERAL;
 					break;
 				case USB_SDP_CHARGER:
+//zz
+					/*wall charger in which D+/D- disconnected 
+					would be recognized as usb cable, 4/7*/
+					schedule_delayed_work(&motg->invalid_chg_work, 5*HZ);					
+					/*end*/
+//zz
+// motg->invalid_chg_work,针对某些PC上USB充电异常添加,例如笔记本休眠时,连接USB充电,因PC处于休眠状态
+// udc部分不会触发连接中断,msm_otg_set_power函数不会被调用,也不会notify给充电模块,故对充电流程有所影响
+// 所以有出现无充电图标或者关机充电时不停重启的故障.
+// 在此添加无效充电检测代码,当SDP充电时,主动设置充电电流500mA,将后续流程走通
+// invalid_chg_work的添加,使得SDP充电不再依赖PC对终端的枚举,只要接入PC 且 PC能向外部供电,即可以启动SDP充电
+// 正常枚举的情况下,会修改标志位disable掉invalid_chg_work,见2/7
 					msm_otg_start_peripheral(otg, 1);
 					otg->phy->state =
 						OTG_STATE_B_PERIPHERAL;
@@ -3076,6 +3117,12 @@ static void msm_otg_sm_work(struct work_struct *w)
 			clear_bit(B_FALSE_SDP, &motg->inputs);
 			clear_bit(A_BUS_REQ, &motg->inputs);
 			cancel_delayed_work_sync(&motg->chg_work);
+//zz
+                        /*wall charger in which D+/D- disconnected would be recognized as usb cable, 5/7*/
+			cancel_delayed_work_sync(&motg->invalid_chg_work);
+			skip_invalid_chg_work = 0;
+			/*end*/			
+//zz
 			dcp = (motg->chg_type == USB_DCP_CHARGER);
 			motg->chg_state = USB_CHG_STATE_UNDEFINED;
 			motg->chg_type = USB_INVALID_CHARGER;
@@ -4767,6 +4814,11 @@ struct msm_otg_platform_data *msm_otg_dt_to_pdata(struct platform_device *pdev)
 				&pdata->power_budget);
 	of_property_read_u32(node, "qcom,hsusb-otg-mode",
 				&pdata->mode);
+	#ifdef ZTE_FEATRUE_USB_OTG
+//	pdata->mode = USB_OTG;
+	#else
+//	pdata->mode = USB_PERIPHERAL;
+	#endif
 	of_property_read_u32(node, "qcom,hsusb-otg-otg-control",
 				&pdata->otg_control);
 	of_property_read_u32(node, "qcom,hsusb-otg-default-mode",
@@ -5218,6 +5270,11 @@ static int msm_otg_probe(struct platform_device *pdev)
 	INIT_DELAYED_WORK(&motg->chg_work, msm_chg_detect_work);
 	INIT_DELAYED_WORK(&motg->id_status_work, msm_id_status_w);
 	INIT_DELAYED_WORK(&motg->suspend_work, msm_otg_suspend_work);
+//zz
+        /*wall charger in which D+/D- disconnected would be recognized as usb cable,6/7*/
+	INIT_DELAYED_WORK(&motg->invalid_chg_work, msm_invalid_chg_work);
+	/*end*/
+//zz
 	setup_timer(&motg->id_timer, msm_otg_id_timer_func,
 				(unsigned long) motg);
 	setup_timer(&motg->chg_check_timer, msm_otg_chg_check_timer_func,
@@ -5270,6 +5327,8 @@ static int msm_otg_probe(struct platform_device *pdev)
 		goto free_async_irq;
 	}
 
+	dev_err(&pdev->dev, "stone motg->pdata->mode %d,motg->pdata->otg_control =%d\n",motg->pdata->mode,motg->pdata->otg_control);
+	
 	if (motg->pdata->mode == USB_OTG &&
 		motg->pdata->otg_control == OTG_PMIC_CONTROL) {
 
@@ -5492,6 +5551,12 @@ static int msm_otg_remove(struct platform_device *pdev)
 	cancel_delayed_work_sync(&motg->chg_work);
 	cancel_delayed_work_sync(&motg->id_status_work);
 	cancel_delayed_work_sync(&motg->suspend_work);
+//zz
+        /*wall charger in which D+/D- disconnected would be recognized as usb cable 7/7*/
+	cancel_delayed_work_sync(&motg->invalid_chg_work);
+	skip_invalid_chg_work = 0;
+	/*end*/
+//zz
 	cancel_work_sync(&motg->sm_work);
 
 	pm_runtime_resume(&pdev->dev);

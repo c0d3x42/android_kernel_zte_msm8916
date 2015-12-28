@@ -80,6 +80,20 @@ int32_t msm_led_i2c_trigger_config(struct msm_led_flash_ctrl_t *fctrl,
 			rc = fctrl->func_tbl->flash_led_off(fctrl);
 		break;
 
+    case MSM_CAMERA_LED_TORCH:
+		for (i = 0; i < fctrl->torch_num_sources; i++) {
+			if (fctrl->torch_max_current[i] > 0) {
+				fctrl->torch_op_current[i] =
+					(cfg->torch_current[i] < fctrl->torch_max_current[i]) ?
+					cfg->torch_current[i] : fctrl->torch_max_current[i];
+				CDBG("torch source%d: op_current %d max_current %d\n",
+					i, fctrl->torch_op_current[i], fctrl->torch_max_current[i]);
+			}
+		}
+		if (fctrl->func_tbl->flash_led_torch)
+			rc = fctrl->func_tbl->flash_led_torch(fctrl);
+		break;
+		
 	case MSM_CAMERA_LED_LOW:
 		for (i = 0; i < fctrl->torch_num_sources; i++) {
 			if (fctrl->torch_max_current[i] > 0) {

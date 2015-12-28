@@ -3,7 +3,7 @@
 #
 
 # Each configuration option enables a list of files.
-
+obj-y					+=sensor_power.o
 obj-$(CONFIG_INPUT_88PM860X_ONKEY)	+= 88pm860x_onkey.o
 obj-$(CONFIG_INPUT_88PM80X_ONKEY)	+= 88pm80x_onkey.o
 obj-$(CONFIG_INPUT_AB8500_PONKEY)	+= ab8500-ponkey.o
@@ -76,7 +76,9 @@ obj-$(CONFIG_SENSORS_LIS3DH)		+= lis3dh_acc.o
 obj-$(CONFIG_SENSORS_BMA2X2)	+= bstclass.o
 
 obj-$(CONFIG_SENSORS_BMA2X2)	+= bma2x2.o
-
+# add sensor hub begin
+obj-$(CONFIG_INPUT_CWSTM32)			+= CwMcuSensor.o
+# add sensor hub end
 ifeq ($(CONFIG_SENSORS_BMA2X2_ENABLE_INT1),y)
 	EXTRA_CFLAGS += -DBMA2X2_ENABLE_INT1
 endif
@@ -84,3 +86,11 @@ endif
 ifeq ($(CONFIG_BOSCH_BMA2X2_ENABLE_INT2),y)
 	EXTRA_CFLAGS += -DBMA2X2_ENABLE_INT2
 endif
+# add ALS sensor begin by jiangchong,2014\12\30
+obj-$(CONFIG_INPUT_LTR559)      += ltr559.o
+# add ALS sensor end by jiangchong,2014\12\30
+
+# add start by jiangchong for Hall sensor driver,20150127
+obj-$(CONFIG_SENSORS_HALL_AH1898) += ah1898.o
+# add end by jiangchong for Hall sensor driver,20150127
+

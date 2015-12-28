@@ -26,7 +26,7 @@
 #include <linux/workqueue.h>
 #include <linux/freezer.h>
 
-#define ALARM_DELTA 120
+#define ALARM_DELTA 60  // ZTE_MODIFY for P839T60 SchedulePowerOn by dingli10091962
 
 /**
  * struct alarm_base - Alarm timer bases
