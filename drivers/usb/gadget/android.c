@@ -3543,7 +3543,7 @@ out:
 	return snprintf(buf, PAGE_SIZE, "%s\n", state);
 }
 //zz
-
+/*zte usb config attr*/
 #define OEM_USB_CONFIG_ATTR(field, format_string)				\
 static ssize_t								\
 field ## _show(struct device *dev, struct device_attribute *attr,	\

@@ -137,6 +137,7 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 		bdata->reset_delay_ms = 0;
 	}
 #ifdef ZTE_FEATURE_LCD_TP_POWERCTRL_F30
+	//add by zte start cc 20141111 for synaptics power down 
 	if (of_property_read_bool(np, "synaptics,lcd-reset-gpio")) {
 		bdata->lcd_reset_gpio = of_get_named_gpio_flags(np,
 				"synaptics,lcd-reset-gpio", 0, NULL);
@@ -168,6 +169,7 @@ static int parse_dt(struct device *dev, struct synaptics_dsx_board_data *bdata)
 	printk("%s:lcd_reset_gpio %u, vdd_io_gpio %u, vcc_dc_gpio %u, disp_debug_en_gpio %u\n",
 	    	__func__,bdata->lcd_reset_gpio,bdata->vdd_io_gpio, 
 	    	bdata->vcc_dc_gpio, bdata->disp_debug_en_gpio);
+	//add zte end
 #endif
 	if (of_property_read_bool(np, "synaptics,max-y-for-2d")) {
 		retval = of_property_read_u32(np, "synaptics,max-y-for-2d",

@@ -25,6 +25,7 @@
 
 #include <linux/i2c.h>
 
+//zte-modify by zuojianfang for nfc begin
 #define PN544_MAGIC	0xE9
 
 /*
@@ -43,6 +44,7 @@ struct pn544_i2c_platform_data{
 	unsigned int clock_gpio;
 	unsigned int int_active_low;
 };
+//zte-modify by zuojianfang for nfc end
 #define PN544_DRIVER_NAME	"pn544"
 #define PN544_MAXWINDOW_SIZE	7
 #define PN544_WINDOW_SIZE	4

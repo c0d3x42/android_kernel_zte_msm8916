@@ -55,7 +55,8 @@ typedef enum {
 	SWITCH_POWER_NORMAL,
 	SWITCH_POWER_CALIB,
 	SWITCH_POWER_INTERRUPT,
-	SWITCH_POWER_PCBA
+	SWITCH_POWER_PCBA,
+	SWITCH_POWER_POLL,
 } SWITCH_POWER_ID;
 
 /* interrupt status */
@@ -70,7 +71,8 @@ typedef enum {
     INTERRUPT_GESTURE               = 7,
     INTERRUPT_ERROR_LOG             = 8,
     INTERRUPT_DEBUG_LOG             = 9,
-    INTERRUPT_TIME_SYNC             = 10
+    INTERRUPT_TIME_SYNC             = 10,
+    INTERRUPT_END					= 11,
 } INTERRUPT_STATUS_LIST;
 
 /* calibrator command */
@@ -99,6 +101,8 @@ typedef enum {
 typedef enum {
     MCU_REGISTER_WRITE_CTRL     = 1,
     MCU_REGISTER_READ_CTRL      = 2,
+    MCU_HWINFO_GET      		= 3,
+    MCU_MAG_DEBUG	      		= 4,
     CHECK_ACC_DATA              = 7,
     CHECK_MAG_DATA              = 8,
     CHECK_GYRO_DATA             = 9,
@@ -212,9 +216,12 @@ Power mode control :
 */
 
 #define CW_MCU_TIMESTAMP						0X83
+#define CW_MAG_DEBUG							0X84
 
 #define CW_POWER_CTRL							0x90
 #define CW_LED_CTRL								0x92
+
+#define CW_PSENSOR_DATA_GET						0x93
 
 #define CW_MCU_STATUS_SET						0x94
 #define CW_MCU_STATUS_GET						0x95
@@ -228,25 +235,47 @@ Power mode control :
 
 #define CW_SET_STEP_COUNTER  					0x9E    /* write, 4 bytes */
 
+#define CW_HW_SENSORLIST						0x9D
+
 //#define CW_GYRO_TEST							0xB6
 
 /* check data of queue if queue is empty */
 #define CWMCU_NODATA							0xff
 
-#define DPS_MAX			(1 << (16 - 1))
-#ifdef __KERNEL__
+typedef enum {
+	DRIVER_NO_USE            = 0,
+	DRIVER_L3GD20             = 1,  //gyro
+	DRIVER_LSM303DLHC    = 2,  //acc + mag
+	DRIVER_LSM330             = 3,  //acc + gyro
+	DRIVER_LPS331AP          = 4,  //pressure
+	DRIVER_BMP280            = 5,  //pressure
+	DRIVER_AKM8963          = 6,  //mag
+	DRIVER_YAS53x              = 7,  //mag
+	DRIVER_BMI055             = 8,  //acc + gyro
+	DRIVER_AGD                   = 9,  //acc + gyro
+	DRIVER_AMI                   = 10,        //mag
+	DRIVER_LSM303D           = 11,        //acc + mag
+	DRIVER_AKM09911                = 12,   //mag
+	DRIVER_MPU6880          = 13,   //acc + gyro
+	DRIVER_BMM150           = 14,   //magnetic
+	DRIVER_APDS9960         = 15,        //light + proximity + gesture
+	DRIVER_LSM6DS0           = 16,        //acc + gyro
+	DRIVER_LP5521              = 17,
+	DRIVER_HSCDTD801      = 18,        //mag
+	DRIVER_LSM6DS3           = 19,        //acc + gyro
+	DRIVER_BMI160             = 20,        //acc + gyro
+	DRIVER_TMD2771      = 21,      //light + proximity
+	DRIVER_LTR559              = 22,        //light + proximity
+	DRIVER_HTS221       = 23,        //humidity + temp
+	DRIVER_SHTC1               = 24,        //humidity + temp
+	DRIVER_LPS25H              = 25,        //pressure
+	DRIVER_STK3X1X		= 26,	//light + proximity
+	DRIVER_ADPD153		= 27,	//Heart rate
+	DRIVER_BH1721		= 28,	//Light
+	DRIVER_GTPA200		= 29,	//pressure
+} HW_ID;
 
-struct CWMCU_platform_data {
-	unsigned char Acceleration_hwid;
-	unsigned char Acceleration_deviceaddr;
-	unsigned char Acceleration_axes;
-	unsigned char Magnetic_hwid;
-	unsigned char Magnetic_deviceaddr;
-	unsigned char Magnetic_axes;
-	unsigned char Gyro_hwid;
-	unsigned char Gyro_deviceaddr;
-	unsigned char Gyro_axes;
-};
-#endif /* __KERNEL */
+
+#define DPS_MAX			(1 << (16 - 1))
 
 #endif /* __CWMCUSENSOR_H__ */

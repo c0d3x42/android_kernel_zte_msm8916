@@ -121,6 +121,7 @@ static struct sensors_classdev sensors_cdev = {
 	.resolution = "0.6",
 	.sensor_power = "0.35",
 	.min_delay = 10000,
+	.max_delay = 10000,
 	.fifo_reserved_event_count = 0,
 	.fifo_max_event_count = 0,
 	.enabled = 0,
@@ -1780,6 +1781,8 @@ static int akm_report_data(struct akm_compass_data *akm)
 	int ret;
 	int mag_x, mag_y, mag_z;
 	int tmp;
+	uint8_t mode;
+	ktime_t timestamp;
 
 	ret = AKECS_GetData_Poll(akm, dat_buf, AKM_SENSOR_DATA_SIZE);
 	if (ret) {
@@ -1790,8 +1793,13 @@ static int akm_report_data(struct akm_compass_data *akm)
 	if (STATUS_ERROR(dat_buf[8])) {
 		dev_warn(&akm->i2c->dev, "Status error. Reset...\n");
 		AKECS_Reset(akm, 0);
+		mode = akm_select_frequency(akm->delay[MAG_DATA_FLAG]);
+		AKECS_SetMode(akm, mode);
+
 		return -EIO;
 	}
+
+	timestamp = ktime_get_boottime();
 
 	tmp = (int)((int16_t)(dat_buf[2]<<8)+((int16_t)dat_buf[1]));
 	tmp = tmp * akm->sense_conf[0] / 128 + tmp;
@@ -1857,11 +1865,12 @@ static int akm_report_data(struct akm_compass_data *akm)
 	input_report_abs(akm->input, ABS_X, mag_x);
 	input_report_abs(akm->input, ABS_Y, mag_y);
 	input_report_abs(akm->input, ABS_Z, mag_z);
-
-	/* avoid eaten by input subsystem framework */
-	if ((mag_x == akm->last_x) && (mag_y == akm->last_y) &&
-			(mag_z == akm->last_z))
-		input_report_abs(akm->input, ABS_MISC, akm->rep_cnt++);
+	input_event(akm->input,
+		EV_SYN, SYN_TIME_SEC,
+		ktime_to_timespec(timestamp).tv_sec);
+	input_event(akm->input,
+		EV_SYN, SYN_TIME_NSEC,
+		ktime_to_timespec(timestamp).tv_nsec);
 
 	akm->last_x = mag_x;
 	akm->last_y = mag_y;

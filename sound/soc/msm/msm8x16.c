@@ -1067,7 +1067,7 @@ static void *def_msm8x16_wcd_mbhc_cal(void)
 	}
 
 #define S(X, Y) ((WCD_MBHC_CAL_PLUG_TYPE_PTR(msm8x16_wcd_cal)->X) = (Y))
-	S(v_hs_max, 1500);
+	S(v_hs_max, 1600);//liyang default 1500
 #undef S
 #define S(X, Y) ((WCD_MBHC_CAL_BTN_DET_PTR(msm8x16_wcd_cal)->X) = (Y))
 	S(num_btn, WCD_MBHC_DEF_BUTTONS);
@@ -1097,7 +1097,8 @@ static void *def_msm8x16_wcd_mbhc_cal(void)
 	btn_low[4] = 137;
 	btn_high[4] = 137;
 
- #ifdef CONFIG_ZTE_MULTI_BUTTON
+//zte liyang modified for three button
+ //#ifdef CONFIG_ZTE_MULTI_BUTTON
        btn_low[0] = 87;
 	btn_high[0] = 100;
 	btn_low[1] = 212.5;
@@ -1108,7 +1109,7 @@ static void *def_msm8x16_wcd_mbhc_cal(void)
 	btn_high[3] = 562.5;
 	btn_low[4] = 550;
 	btn_high[4] = 725;
-#endif
+//#endif
 
 	return msm8x16_wcd_cal;
 }

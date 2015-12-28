@@ -1241,10 +1241,12 @@ static int qpnp_pon_config_init(struct qpnp_pon *pon)
 				return rc;
 			}
 
+            // ZTE_MODIFY start for kpdpwr reset type by dingli10091962
             if ((PON_KPDPWR == cfg->pon_type) && (NULL != strstr(saved_command_line, "kpdpwr_warm_reset=1")))
             {
                 cfg->s2_type = 1;
             }
+            // ZTE_MODIFY end for kpdpwr reset type by dingli10091962
     
 			if (cfg->s2_type > QPNP_PON_RESET_TYPE_MAX) {
 				dev_err(&pon->spmi->dev,
@@ -1421,6 +1423,45 @@ static struct kernel_param_ops dload_on_uvlo_ops = {
 };
 
 module_param_cb(dload_on_uvlo, &dload_on_uvlo_ops, &dload_on_uvlo, 0644);
+
+
+static bool dload_on_warm_boot_enable;
+
+static int qpnp_pon_debugfs_warm_boot_enable_dload_set(const char *val,
+		const struct kernel_param *kp)
+{
+	int rc = 0;
+
+    pr_err("qpnp_pon_debugfs_warm_boot_enable_dload_set...\n");
+	rc = param_set_bool(val, kp);
+	if (rc) 
+	{
+		pr_err("Unable to set bms_reset: %d\n", rc);
+		return rc;
+	}
+
+	if (*(bool *)kp->arg)
+	{
+	    pr_err("set PON_POWER_OFF_WARM_RESET\n");
+		qpnp_pon_system_pwr_off(PON_POWER_OFF_WARM_RESET);
+	}
+	else
+	{
+	    pr_err("set PON_POWER_OFF_HARD_RESET\n");
+	    qpnp_pon_system_pwr_off(PON_POWER_OFF_HARD_RESET);
+	}
+	
+	return 0;
+}
+
+
+static struct kernel_param_ops dload_on_warm_boot_enable_ops = {
+	.set = qpnp_pon_debugfs_warm_boot_enable_dload_set,
+	.get = NULL,
+};
+
+module_param_cb(dload_on_warm_boot_enable, &dload_on_warm_boot_enable_ops, &dload_on_warm_boot_enable, 0644);
+
 
 #if defined(CONFIG_DEBUG_FS)
 
@@ -1692,6 +1733,10 @@ static int qpnp_pon_probe(struct spmi_device *spmi)
 					spmi->dev.of_node,
 					"qcom,store-hard-reset-reason");
 
+    /* ZTE added, config PON_POWER_OFF_HARD_RESET */
+    qpnp_pon_system_pwr_off(PON_POWER_OFF_HARD_RESET);
+	/* End added */
+	
 	qpnp_pon_debugfs_init(spmi);
 	return rc;
 }

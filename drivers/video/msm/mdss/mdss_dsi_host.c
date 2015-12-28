@@ -71,22 +71,7 @@ struct mdss_dsi_event {
 static struct mdss_dsi_event dsi_event;
 
 static int dsi_event_thread(void *data);
-//modify by yujianhua for mdss_dsi_isr error 
- static void mdss_dsi_set_reg(struct mdss_dsi_ctrl_pdata *ctrl, int off,
- 						u32 mask, u32 val)
- {
- 	u32 data;
- 
- 	off &= ~0x03;
- 	val &= mask;    /* set bits indicated at mask only */
- 	data = MIPI_INP(ctrl->ctrl_base + off);
- 	data &= ~mask;
- 	data |= val;
- 	pr_debug("%s: ndx=%d off=%x data=%x\n", __func__,
- 				ctrl->ndx, off, data);
- 	MIPI_OUTP(ctrl->ctrl_base + off, data);
- }
-//modify by yujianhua for mdss_dsi_isr error end
+
 void mdss_dsi_ctrl_init(struct device *ctrl_dev,
 			struct mdss_dsi_ctrl_pdata *ctrl)
 {
@@ -1685,6 +1670,7 @@ static int mdss_dsi_cmd_dma_tx(struct mdss_dsi_ctrl_pdata *ctrl,
 			ctrl->mdss_util->get_iommu_domain(domain),
 							0, ctrl->dma_size);
 	}
+
 	if (ignored) {
 		/* clear pending overflow status */
 		mdss_dsi_set_reg(ctrl, 0xc, 0xffffffff, 0x44440000);

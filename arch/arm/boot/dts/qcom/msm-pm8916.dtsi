@@ -33,7 +33,6 @@
 			qcom,pon-dbc-delay = <15625>;
 			qcom,system-reset;
 			qcom,clear-warm-reset;
-                        zte,bat-sw-off-gpio = <&pm8916_gpios 3 0x00>;
                         qcom,s3-src = "kpdpwr";
                         qcom,s3-debounce = <16>;
 			qcom,store-hard-reset-reason;

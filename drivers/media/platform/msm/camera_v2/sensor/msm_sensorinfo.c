@@ -37,7 +37,8 @@
 #define SENSOR_INFO_OV5648_MODEL_ID     0x5648
 #define SENSOR_INFO_IMX214_MODEL_ID     0x0214
 #define SENSOR_INFO_S5K3L2_MODEL_ID     0x30c2
-
+#define SENSOR_INFO_S5K3M2XM_MODEL_ID     0x30D2
+#define SENSOR_INFO_S5K5E2_MODEL_ID     0x5e20
 
 
 
@@ -49,6 +50,7 @@
 static uint16_t g_back_sensor_id = 0;
 static uint16_t g_front_sensor_id = 0;
 static uint16_t module_integrator_id = 0;
+static uint16_t module_integrator_3m2_id = 0;
 
 /*-----------------------------------------------------------------------------------------
  *
@@ -73,10 +75,14 @@ EXPORT_SYMBOL(msm_sensorinfo_set_back_sensor_id);
 
 
 DEFINE_SEMAPHORE(set_back_sensor_module_id_sem);
-void msm_sensorinfo_set_back_sensor_module_id(uint16_t module_id)
+void msm_sensorinfo_set_back_sensor_module_id(uint8_t module_id, uint8_t eeprom_id)
 {
     down(&set_back_sensor_module_id_sem);
+	if(eeprom_id == 8){
 	module_integrator_id = module_id;
+	}else{
+	  module_integrator_3m2_id = module_id;
+	}
     up(&set_back_sensor_module_id_sem);
 }
 EXPORT_SYMBOL(msm_sensorinfo_set_back_sensor_module_id);
@@ -124,6 +130,17 @@ static int rear_camera_name_proc_show(struct seq_file *m, void *v)
 			  sprintf(sensor_name, "S5K3L2-13M-AF");
 			}
 			break;	
+		case SENSOR_INFO_S5K3M2XM_MODEL_ID:
+			if(module_integrator_3m2_id==0x6){ 
+				sprintf(sensor_name, "S5K3M2XM-qtech-13M-AF");
+			}else if(module_integrator_3m2_id==0x31){ 
+				sprintf(sensor_name, "S5K3M2XM-mcnex-13M-AF");
+			}else if(module_integrator_3m2_id==0x15){ 
+				sprintf(sensor_name, "S5K3M2XM-Liteon-13M-AF");
+			}else{ 
+			  sprintf(sensor_name, "S5K3M2XM-13M-AF");
+			}
+			break;	
 		default:
 			sprintf(sensor_name, "No sensor or error ID!");
 			break;
@@ -144,6 +161,9 @@ static int front_camera_name_proc_show(struct seq_file *m, void *v)
 	{
 		case SENSOR_INFO_OV5648_MODEL_ID:
 			sprintf(sensor_name, "OV5648-5Mp-FF");
+			break;
+		case SENSOR_INFO_S5K5E2_MODEL_ID:
+			sprintf(sensor_name, "S5K5E2-5Mp-FF");
 			break;
 		default:
 			sprintf(sensor_name, "No sensor or error ID!");

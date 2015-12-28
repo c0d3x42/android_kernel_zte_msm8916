@@ -25,9 +25,9 @@
 #include <sound/jack.h>
 #include <sound/core.h>
 
-
+/*ZTE_MODIFY by liyang for fastmmi 2014/07/07 start*/
 #include <linux/proc_fs.h>
-
+/*ZTE_MODIFY by liyang for fastmmi 2014/07/07 end*/
 
 static int jack_switch_types[] = {
 	SW_HEADPHONE_INSERT,
@@ -42,7 +42,7 @@ static int jack_switch_types[] = {
 	SW_MICROPHONE2_INSERT,
 };
 
-
+/*ZTE_MODIFY by liyang for fastmmi 2014/07/07 start*/
 static int hs_type = 0;
 
 static int hs_show(struct seq_file *m, void *v)
@@ -57,7 +57,7 @@ static int hs_open(struct inode *inode, struct file *file)
     return single_open(file, hs_show, NULL);
 }
 
-
+/*ZTE_MODIFY by liyang for fastmmi 2014/07/07 end*/
 
 static const struct file_operations jack_proc_fops = {
 	.owner		= THIS_MODULE,
@@ -122,12 +122,12 @@ static int snd_jack_dev_register(struct snd_device *device)
 	if (err == 0)
 		jack->registered = 1;
 
-
+/*ZTE_MODIFY by liyang for fastmmi 2014/07/07 start*/
 	proc_hs_type = proc_create("hs", S_IRUGO, NULL, &jack_proc_fops);
 	if (!proc_hs_type) {
 		printk(KERN_ERR"hs: unable to register '/proc/hs' \n");
 	}
-
+/*ZTE_MODIFY by liyang for fastmmi 2014/07/07 end*/
 	return err;
 }
 

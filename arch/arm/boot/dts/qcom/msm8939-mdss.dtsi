@@ -307,5 +307,6 @@
 #include "dsi-panel-sim-cmd.dtsi"
 //zte lixuetao add
 #include "dsi-panel-otm1284a-cpt-720p-video-zte.dtsi"
+#include "dsi-panel-otm1284a-cpt-otp-720p-video-zte.dtsi"
 #include "dsi-panel-otm1285a-tianma-720p-video-zte.dtsi"
 //zte code end

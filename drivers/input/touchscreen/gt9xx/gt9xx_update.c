@@ -111,7 +111,39 @@ u16 show_len;
 u16 total_len;
 u8 got_file_flag = 0;
 u8 searching_file = 0;
+#if defined(V55_SFR_HUOER)
+extern int last_cover_status;
+extern int g_is_cover_touchscreen;
+#endif
+#if defined(CONFIG_GT9XX_TOUCHPANEL_P839T60)
+    extern u8 cfg_info_group1[];
+    extern u8 cfg_info_group2[];
+    extern u8 cfg_info_group3[];
+    extern u8 cfg_info_group4[];
+    extern u8 cfg_info_group5[];
+    extern u8 cfg_info_group6[];
+    extern u8 *send_cfg_buf[];
+    extern u8 cfg_info_len[] ;
+#else
+/*  modified by lilish  20150422 */
+    extern u8 cfg_info_group1[];
+    extern u8 cfg_info_group2[];
+    extern u8 cfg_info_group3[];
+    extern u8 cfg_info_group4[];
+    extern u8 cfg_info_group5[];
+    extern u8 cfg_info_group6[];
 
+    extern u8 cfg_info_group7[];
+    extern u8 cfg_info_group8[];
+    extern u8 cfg_info_group9[];
+    extern u8 cfg_info_group10[];
+    extern u8 cfg_info_group11[];
+    extern u8 cfg_info_group12[];
+
+    extern u8 *send_cfg_buf[];
+    extern u8 cfg_info_len[];
+/*  modified by lilish  20150422 */
+#endif
 extern u8 config[GTP_CONFIG_MAX_LENGTH + GTP_ADDR_LENGTH];
 extern void gtp_reset_guitar(struct i2c_client *client, s32 ms);
 extern s32  gtp_send_cfg(struct i2c_client *client);
@@ -220,7 +252,12 @@ static s32 gup_init_panel(struct goodix_ts_data *ts)
     u8 opr_buf[16];
     u8 sensor_id = 0;
     u16 version = 0;
-
+#if defined(CONFIG_GT9XX_TOUCHPANEL_P839T60)
+#else	
+    u8 sensor_id_temp1 = 0;
+    u8 sensor_id_temp2 = 0;
+#endif
+#if 0
     u8 cfg_info_group1[] = CTP_CFG_GROUP1;
     u8 cfg_info_group2[] = CTP_CFG_GROUP2;
     u8 cfg_info_group3[] = CTP_CFG_GROUP3;
@@ -235,6 +272,7 @@ static s32 gup_init_panel(struct goodix_ts_data *ts)
                           CFG_GROUP_LEN(cfg_info_group4),
                           CFG_GROUP_LEN(cfg_info_group5),
                           CFG_GROUP_LEN(cfg_info_group6)};
+#endif
 
     if ((!cfg_info_len[1]) && (!cfg_info_len[2]) &&
         (!cfg_info_len[3]) && (!cfg_info_len[4]) &&
@@ -261,7 +299,52 @@ static s32 gup_init_panel(struct goodix_ts_data *ts)
     }
 
     GTP_DEBUG("Sensor_ID: %d", sensor_id);
-
+#if defined(CONFIG_GT9XX_TOUCHPANEL_P839T60)
+#else
+/*  modified by lilish  20150422 */
+	ret = gtp_i2c_read_dbl_check(ts->client, 0x810A, &sensor_id_temp1, 1);
+	GTP_INFO("Sensor_ID_temp1: %d", sensor_id_temp1);
+	if (SUCCESS == ret)
+    {
+	 	ret = gtp_i2c_read_dbl_check(ts->client, 0x810B, &sensor_id_temp2, 1);
+	 	GTP_INFO("Sensor_ID_temp2: %d", sensor_id_temp2);
+	 	if (SUCCESS == ret)
+       	{
+       		if((sensor_id_temp1 == 0x57) && (sensor_id_temp2 == 0x02))
+       		{
+       			sensor_id = sensor_id + 6;//white config
+       			GTP_INFO("Sensor_ID: %d", sensor_id);
+       		}
+       		else
+       		{
+       			GTP_INFO("Sensor_ID: %d", sensor_id);
+       		}
+			//add by wkh begin
+			#if defined(V55_SFR_HUOER)
+			if(g_is_cover_touchscreen == 0)//has been covered,small window
+			{
+				sensor_id = sensor_id + 4;
+				GTP_INFO("that's small window,Sensor_ID: %d", sensor_id);
+			}
+			last_cover_status = g_is_cover_touchscreen;
+			#endif
+			//end
+      	}
+      	else
+      	{
+      		GTP_ERROR("Failed to get sensor_id_temp2, No config sent!");
+      		ts->pnl_init_error = 1;
+          	return -1;
+      	}
+	}
+	else
+	{
+	 	GTP_ERROR("Failed to get sensor_id_temp1, No config sent!");
+      	ts->pnl_init_error = 1;
+        return -1;
+	}
+/*  modified by lilish  20150422 */  
+#endif
     ts->gtp_cfg_len = cfg_info_len[sensor_id];
 
     if (ts->gtp_cfg_len < GTP_CONFIG_MIN_LENGTH)
@@ -311,8 +394,18 @@ static s32 gup_init_panel(struct goodix_ts_data *ts)
     {
         check_sum += config[i];
     }
-    config[ts->gtp_cfg_len] = (~check_sum) + 1;
-
+	//modify by gt and zte begin
+    if(config[ts->gtp_cfg_len] != (~check_sum) + 1)
+	{
+	    ts->pnl_init_error = 1;
+		return -1;
+	}
+#if defined(CONFIG_GT9XX_TOUCHPANEL_P839T60)
+#else	
+    sensor_id_temp1 = config[GTP_ADDR_LENGTH + 0x810A - 0x8047];
+	GTP_INFO("Sensor_ID_temp1:%d\n",sensor_id_temp1);
+#endif
+	//end
     GTP_DEBUG_FUNC();
     ret = gtp_send_cfg(ts->client);
     if (ret < 0)

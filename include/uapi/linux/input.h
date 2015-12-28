@@ -481,12 +481,12 @@ struct input_keymap_entry {
 #define KEY_HALL_SENSOR_UP	 250
 /* add end by jiangchong for Hall sensor driver,20141212*/
 
-
+/*added by zte_sw_chenhui for slip key  begin*/
 #define KEY_SLIP_DOWN	251
 #define KEY_SLIP_UP	    252
 #define KEY_SLIP_LEFT	253
 #define KEY_SLIP_RIGHT	254
-
+/*added by zte_sw_chenhui for slip key end*/
 /* Code 255 is reserved for special needs of AT keyboard driver */
 
 #define BTN_MISC		0x100

@@ -69,7 +69,6 @@
 #define GOODIX_PINCTRL_STATE_SLEEP "gt9xx_int_suspend"
 #define GOODIX_PINCTRL_STATE_DEFAULT "gt9xx_int_default"
 /*[BUGFIX]Add End by TCTSZ-LZ 2014-5-5,PR-667466. TP INT pull-up enable.*/
-
 static const char *goodix_ts_name = "goodix-ts";
 static struct workqueue_struct *goodix_wq;
 struct i2c_client * i2c_connect_client = NULL;
@@ -97,7 +96,55 @@ u8 config[GTP_CONFIG_MAX_LENGTH + GTP_ADDR_LENGTH]
 #define GOODIX_VIO_LOAD_MAX_UA	10000
 #define PROP_NAME_SIZE		24
 #define GOODIX_COORDS_ARR_SIZE	4
+#if defined(CONFIG_GT9XX_TOUCHPANEL_P839T60)
+    u8 cfg_info_group1[] = CTP_CFG_GROUP1;
+    u8 cfg_info_group2[] = CTP_CFG_GROUP2;
+    u8 cfg_info_group3[] = CTP_CFG_GROUP3;
+    u8 cfg_info_group4[] = CTP_CFG_GROUP4;
+    u8 cfg_info_group5[] = CTP_CFG_GROUP5;
+    u8 cfg_info_group6[] = CTP_CFG_GROUP6;
+    u8 *send_cfg_buf[] = {cfg_info_group1, cfg_info_group2, cfg_info_group3,
+                        cfg_info_group4, cfg_info_group5, cfg_info_group6};
+    u8 cfg_info_len[] = { CFG_GROUP_LEN(cfg_info_group1),
+                          CFG_GROUP_LEN(cfg_info_group2),
+                          CFG_GROUP_LEN(cfg_info_group3),
+                          CFG_GROUP_LEN(cfg_info_group4),
+                          CFG_GROUP_LEN(cfg_info_group5),
+                          CFG_GROUP_LEN(cfg_info_group6)};
+#else
+/*  modified by lilish  20150422 */
+    u8 cfg_info_group1[] = CTP_CFG_GROUP1;
+    u8 cfg_info_group2[] = CTP_CFG_GROUP2;
+    u8 cfg_info_group3[] = CTP_CFG_GROUP3;
+    u8 cfg_info_group4[] = CTP_CFG_GROUP4;
+    u8 cfg_info_group5[] = CTP_CFG_GROUP5;
+    u8 cfg_info_group6[] = CTP_CFG_GROUP6;
 
+    u8 cfg_info_group7[] = CTP_CFG_GROUP1_white;
+    u8 cfg_info_group8[] = CTP_CFG_GROUP2_white;
+    u8 cfg_info_group9[] = CTP_CFG_GROUP3_white;
+    u8 cfg_info_group10[] = CTP_CFG_GROUP4_white;
+    u8 cfg_info_group11[] = CTP_CFG_GROUP5_white;
+    u8 cfg_info_group12[] = CTP_CFG_GROUP6_white;
+
+    u8 *send_cfg_buf[] = {cfg_info_group1, cfg_info_group2, cfg_info_group3,
+                        cfg_info_group4, cfg_info_group5, cfg_info_group6,
+                         cfg_info_group7, cfg_info_group8,cfg_info_group9, 
+                        cfg_info_group10, cfg_info_group11,cfg_info_group12};
+    u8 cfg_info_len[] = { CFG_GROUP_LEN(cfg_info_group1),
+                          CFG_GROUP_LEN(cfg_info_group2),
+                          CFG_GROUP_LEN(cfg_info_group3),
+                          CFG_GROUP_LEN(cfg_info_group4),
+                          CFG_GROUP_LEN(cfg_info_group5),
+                          CFG_GROUP_LEN(cfg_info_group6),
+                          CFG_GROUP_LEN(cfg_info_group7),
+                          CFG_GROUP_LEN(cfg_info_group8),
+                          CFG_GROUP_LEN(cfg_info_group9),
+                          CFG_GROUP_LEN(cfg_info_group10),
+                          CFG_GROUP_LEN(cfg_info_group11),
+                          CFG_GROUP_LEN(cfg_info_group12)};
+/*  modified by lilish  20150422 */
+#endif
 //static u8 chip_gt9xxs;  /* true if ic is gt9xxs, like gt915s */
 
 #define GTP_LARGE_AREA_SLEEP		    1	/*[BUGFIX] Add by TCTSZ.WH,2014-5-27,Add palm lock function.*/
@@ -181,6 +228,10 @@ static s8 gtp_enter_doze(struct goodix_ts_data *ts);
 #endif
 
 u8 grp_cfg_version = 0;
+#if defined(V55_SFR_HUOER)
+int last_cover_status = 1;
+int g_is_cover_touchscreen = 1;
+#endif
 //add by yujianhua begin
 static struct proc_dir_entry *touch_proc_dir_entry;
 
@@ -473,7 +524,12 @@ static void gtp_touch_down(struct goodix_ts_data* ts,s32 id,s32 x,s32 y,s32 w)
 #if GTP_CHANGE_X2Y
     GTP_SWAP(x, y);
 #endif
-
+#if defined(V55_SFR_HUOER)
+    if((g_is_cover_touchscreen == 0) && ((y < 495) || (y > 1455)))//cover is close
+	{
+	    return;
+	}
+#endif
 #if GTP_ICS_SLOT_REPORT
     input_mt_slot(ts->input_dev, id);
     input_report_abs(ts->input_dev, ABS_MT_TRACKING_ID, id);
@@ -609,6 +665,335 @@ static void gtp_pen_up(s32 id)
 
 }
 #endif
+#if GTP_DRIVER_SEND_CFG
+static s32 gtp_get_info(struct goodix_ts_data *ts)
+{
+    u8 opr_buf[6] = {0};
+    s32 ret = 0;
+
+    ts->abs_x_max = GTP_MAX_WIDTH;
+    ts->abs_y_max = GTP_MAX_HEIGHT;
+    ts->int_trigger_type = GTP_INT_TRIGGER;
+  
+    opr_buf[0] = (u8)((GTP_REG_CONFIG_DATA+1) >> 8);
+    opr_buf[1] = (u8)((GTP_REG_CONFIG_DATA+1) & 0xFF);
+
+    ret = gtp_i2c_read(ts->client, opr_buf, 6);
+    if (ret < 0)
+    {
+        return FAIL;
+    }
+
+    ts->abs_x_max = (opr_buf[3] << 8) + opr_buf[2];
+    ts->abs_y_max = (opr_buf[5] << 8) + opr_buf[4];
+
+    opr_buf[0] = (u8)((GTP_REG_CONFIG_DATA+6) >> 8);
+    opr_buf[1] = (u8)((GTP_REG_CONFIG_DATA+6) & 0xFF);
+
+    ret = gtp_i2c_read(ts->client, opr_buf, 3);
+    if (ret < 0)
+    {
+        return FAIL;
+    }
+    ts->int_trigger_type = opr_buf[2] & 0x03;
+    
+    GTP_INFO("X_MAX = %d, Y_MAX = %d, TRIGGER = 0x%02x",
+            ts->abs_x_max,ts->abs_y_max,ts->int_trigger_type);
+
+    return SUCCESS;    
+}
+#endif
+
+/*******************************************************
+Function:
+    Initialize gtp.
+Input:
+    ts: goodix private data
+Output:
+    Executive outcomes.
+        0: succeed, otherwise: failed
+*******************************************************/
+static s32 gtp_init_panel(struct goodix_ts_data *ts)
+{
+    s32 ret = -1;
+
+#if GTP_DRIVER_SEND_CFG
+    s32 i = 0;
+    u8 check_sum = 0;
+    u8 opr_buf[16] = {0};
+    u8 sensor_id = 0;
+	
+#if defined(CONFIG_GT9XX_TOUCHPANEL_P839T60)
+#else	
+    u8 sensor_id_temp1 = 0;
+    u8 sensor_id_temp2 = 0;
+#endif
+
+#if GTP_COMPATIBLE_MODE
+    if (CHIP_TYPE_GT9F == ts->chip_type)
+    {
+        ts->fw_error = 0;
+    }
+    else
+#endif
+    {/* check firmware */
+        ret = gtp_i2c_read_dbl_check(ts->client, 0x41E4, opr_buf, 1);
+        if (SUCCESS == ret) 
+        {
+            if (opr_buf[0] != 0xBE)
+            {
+                ts->fw_error = 1;
+                GTP_ERROR("Firmware error, no config sent!");
+                return -1;
+            }
+        }
+    }
+
+    if ((!cfg_info_len[1]) && (!cfg_info_len[2]) &&
+        (!cfg_info_len[3]) && (!cfg_info_len[4]) &&
+        (!cfg_info_len[5]))
+    {
+        sensor_id = 0; 
+    }
+    else
+    {
+    #if GTP_COMPATIBLE_MODE
+        msleep(50);
+    #endif
+        ret = gtp_i2c_read_dbl_check(ts->client, GTP_REG_SENSOR_ID, &sensor_id, 1);
+        if (SUCCESS == ret)
+        {
+            if (sensor_id >= 0x06)
+            {
+                GTP_ERROR("Invalid sensor_id(0x%02X), No Config Sent!", sensor_id);
+                ts->pnl_init_error = 1;
+                return -1;
+            }
+        }
+        else
+        {
+            GTP_ERROR("Failed to get sensor_id, No config sent!");
+            ts->pnl_init_error = 1;
+            return -1;
+        }
+        GTP_INFO("Sensor_ID: %d", sensor_id);
+    }
+#if defined(CONFIG_GT9XX_TOUCHPANEL_P839T60)
+#else
+/*  modified by lilish  20150422 */
+	ret = gtp_i2c_read_dbl_check(ts->client, 0x810A, &sensor_id_temp1, 1);
+	GTP_INFO("Sensor_ID_temp1: %d", sensor_id_temp1);
+	if (SUCCESS == ret)
+    {
+	 	ret = gtp_i2c_read_dbl_check(ts->client, 0x810B, &sensor_id_temp2, 1);
+	 	GTP_INFO("Sensor_ID_temp2: %d", sensor_id_temp2);
+	 	if (SUCCESS == ret)
+       	{
+       		if((sensor_id_temp1 == 0x57) && (sensor_id_temp2 == 0x02))
+       		{
+       			sensor_id = sensor_id + 6;//white config
+       			GTP_INFO("Sensor_ID: %d", sensor_id);
+       		}
+       		else
+       		{
+       			GTP_INFO("Sensor_ID: %d", sensor_id);
+       		}
+			//add by wkh begin
+			#if defined(V55_SFR_HUOER)
+			if(g_is_cover_touchscreen == 0)//has been covered,small window
+			{
+				sensor_id = sensor_id + 4;
+				GTP_INFO("that's small window,Sensor_ID: %d", sensor_id);
+			}
+			last_cover_status = g_is_cover_touchscreen;
+			#endif
+			//end
+      	}
+      	else
+      	{
+      		GTP_ERROR("Failed to get sensor_id_temp2, No config sent!");
+      		ts->pnl_init_error = 1;
+          	return -1;
+      	}
+	}
+	else
+	{
+	 	GTP_ERROR("Failed to get sensor_id_temp1, No config sent!");
+      	ts->pnl_init_error = 1;
+        return -1;
+	}
+/*  modified by lilish  20150422 */  
+#endif
+//add by yujianhua begin
+    gt9xx_sensor_id=sensor_id;
+//add by yujianhua end
+    ts->gtp_cfg_len = cfg_info_len[sensor_id];
+    GTP_INFO("CTP_CONFIG_GROUP%d used, config length: %d", sensor_id + 1, ts->gtp_cfg_len);
+
+    if (ts->gtp_cfg_len < GTP_CONFIG_MIN_LENGTH)
+    {
+        GTP_ERROR("Config Group%d is INVALID CONFIG GROUP(Len: %d)! NO Config Sent! You need to check you header file CFG_GROUP section!", sensor_id+1, ts->gtp_cfg_len);
+        ts->pnl_init_error = 1;
+        return -1;
+    }
+
+#if GTP_COMPATIBLE_MODE
+    if (CHIP_TYPE_GT9F == ts->chip_type)
+    {
+        ts->fixed_cfg = 0;
+    }
+    else
+#endif
+    {
+        ret = gtp_i2c_read_dbl_check(ts->client, GTP_REG_CONFIG_DATA, &opr_buf[0], 1);
+        
+        if (ret == SUCCESS)
+        {
+            GTP_DEBUG("CFG_GROUP%d Config Version: %d, 0x%02X; IC Config Version: %d, 0x%02X", sensor_id+1,
+                        send_cfg_buf[sensor_id][0], send_cfg_buf[sensor_id][0], opr_buf[0], opr_buf[0]);
+
+	    grp_cfg_version = send_cfg_buf[sensor_id][0];       // backup group config version
+            if (opr_buf[0] < 90)
+            {
+                //grp_cfg_version = send_cfg_buf[sensor_id][0];       // backup group config version
+                send_cfg_buf[sensor_id][0] = 0x00;
+                ts->fixed_cfg = 0;
+            }
+            else        // treated as fixed config, not send config
+            {
+                GTP_INFO("Ic fixed config with config version(%d, 0x%02X)", opr_buf[0], opr_buf[0]);
+				//ts->fixed_cfg = 1;
+                ts->fixed_cfg = 0;
+				if(0)
+                gtp_get_info(ts);
+                //return 0;
+            }
+        }
+        else
+        {
+            GTP_ERROR("Failed to get ic config version!No config sent!");
+            return -1;
+        }
+    }
+
+    memset(&config[GTP_ADDR_LENGTH], 0, GTP_CONFIG_MAX_LENGTH);
+    memcpy(&config[GTP_ADDR_LENGTH], send_cfg_buf[sensor_id], ts->gtp_cfg_len);
+
+#if GTP_CUSTOM_CFG
+    config[RESOLUTION_LOC]     = (u8)GTP_MAX_WIDTH;
+    config[RESOLUTION_LOC + 1] = (u8)(GTP_MAX_WIDTH>>8);
+    config[RESOLUTION_LOC + 2] = (u8)GTP_MAX_HEIGHT;
+    config[RESOLUTION_LOC + 3] = (u8)(GTP_MAX_HEIGHT>>8);
+
+    if (GTP_INT_TRIGGER == 0)  //RISING
+    {
+        config[TRIGGER_LOC] &= 0xfe; 
+    }
+    else if (GTP_INT_TRIGGER == 1)  //FALLING
+    {
+        config[TRIGGER_LOC] |= 0x01;
+    }
+#endif  // GTP_CUSTOM_CFG
+
+    check_sum = 0;
+    for (i = GTP_ADDR_LENGTH; i < ts->gtp_cfg_len; i++)
+    {
+        check_sum += config[i];
+    }
+    config[ts->gtp_cfg_len] = (~check_sum) + 1;
+
+#else // driver not send config
+
+    ts->gtp_cfg_len = GTP_CONFIG_MAX_LENGTH;
+    ret = gtp_i2c_read(ts->client, config, ts->gtp_cfg_len + GTP_ADDR_LENGTH);
+    if (ret < 0)
+    {
+        GTP_ERROR("Read Config Failed, Using Default Resolution & INT Trigger!");
+        ts->abs_x_max = GTP_MAX_WIDTH;
+        ts->abs_y_max = GTP_MAX_HEIGHT;
+        ts->int_trigger_type = GTP_INT_TRIGGER;
+    }
+
+#endif // GTP_DRIVER_SEND_CFG
+
+    if ((ts->abs_x_max == 0) && (ts->abs_y_max == 0))
+    {
+        ts->abs_x_max = (config[RESOLUTION_LOC + 1] << 8) + config[RESOLUTION_LOC];
+        ts->abs_y_max = (config[RESOLUTION_LOC + 3] << 8) + config[RESOLUTION_LOC + 2];
+        ts->int_trigger_type = (config[TRIGGER_LOC]) & 0x03; 
+    }
+
+#if GTP_COMPATIBLE_MODE
+    if (CHIP_TYPE_GT9F == ts->chip_type)
+    {
+        u8 sensor_num = 0;
+        u8 driver_num = 0;
+        u8 have_key = 0;
+
+        have_key = (config[GTP_REG_HAVE_KEY - GTP_REG_CONFIG_DATA + 2] & 0x01);
+
+        if (1 == ts->is_950)
+        {
+            driver_num = config[GTP_REG_MATRIX_DRVNUM - GTP_REG_CONFIG_DATA + 2];
+            sensor_num = config[GTP_REG_MATRIX_SENNUM - GTP_REG_CONFIG_DATA + 2];
+            if (have_key)
+            {
+                driver_num--;
+            }
+            ts->bak_ref_len = (driver_num * (sensor_num - 1) + 2) * 2 * 6;
+        }
+        else
+        {
+            driver_num = (config[CFG_LOC_DRVA_NUM] & 0x1F) + (config[CFG_LOC_DRVB_NUM]&0x1F);
+            if (have_key)
+            {
+                driver_num--;
+            }
+            sensor_num = (config[CFG_LOC_SENS_NUM] & 0x0F) + ((config[CFG_LOC_SENS_NUM] >> 4) & 0x0F);
+            ts->bak_ref_len = (driver_num * (sensor_num - 2) + 2) * 2;
+        }
+
+        GTP_INFO("Drv * Sen: %d * %d(key: %d), X_MAX: %d, Y_MAX: %d, TRIGGER: 0x%02x",
+           driver_num, sensor_num, have_key, ts->abs_x_max,ts->abs_y_max,ts->int_trigger_type);
+        return 0;
+    }
+    else
+#endif
+    {
+    #if GTP_DRIVER_SEND_CFG
+        ret = gtp_send_cfg(ts->client);
+        if (ret < 0)
+        {
+            GTP_ERROR("Send config error.");
+        }
+        // set config version to CTP_CFG_GROUP, for resume to send config
+        config[GTP_ADDR_LENGTH] = grp_cfg_version;
+        check_sum = 0;
+        for (i = GTP_ADDR_LENGTH; i < ts->gtp_cfg_len; i++)
+        {
+            check_sum += config[i];
+        }
+        config[ts->gtp_cfg_len] = (~check_sum) + 1;
+    #endif
+        GTP_INFO("X_MAX: %d, Y_MAX: %d, TRIGGER: 0x%02x", ts->abs_x_max,ts->abs_y_max,ts->int_trigger_type);
+    }
+
+    msleep(10);
+#if 0
+	/*[BUGFIX] ADD begin by TCTSZ-WH,2014-5-14,Show TP config version*/
+	ret = gtp_i2c_read_dbl_check(ts->client, GTP_REG_CONFIG_DATA,
+			&grp_cfg_version, 1);
+	if(SUCCESS != ret)
+	{
+		 GTP_ERROR("Failed to get ic config version!");
+	}
+#endif
+	/*[BUGFIX] ADD begin by TCTSZ-WH,2014-5-14,Show TP config version*/
+
+	//g_tp_cfg_ver = grp_cfg_version;
+    return 0;
+}
+
 
 /*******************************************************
 Function:
@@ -1462,378 +1847,6 @@ static s8 gtp_wakeup_sleep(struct goodix_ts_data * ts)
     GTP_ERROR("GTP wakeup sleep failed.");
     return ret;
 }
-#if GTP_DRIVER_SEND_CFG
-static s32 gtp_get_info(struct goodix_ts_data *ts)
-{
-    u8 opr_buf[6] = {0};
-    s32 ret = 0;
-
-    ts->abs_x_max = GTP_MAX_WIDTH;
-    ts->abs_y_max = GTP_MAX_HEIGHT;
-    ts->int_trigger_type = GTP_INT_TRIGGER;
-  
-    opr_buf[0] = (u8)((GTP_REG_CONFIG_DATA+1) >> 8);
-    opr_buf[1] = (u8)((GTP_REG_CONFIG_DATA+1) & 0xFF);
-
-    ret = gtp_i2c_read(ts->client, opr_buf, 6);
-    if (ret < 0)
-    {
-        return FAIL;
-    }
-
-    ts->abs_x_max = (opr_buf[3] << 8) + opr_buf[2];
-    ts->abs_y_max = (opr_buf[5] << 8) + opr_buf[4];
-
-    opr_buf[0] = (u8)((GTP_REG_CONFIG_DATA+6) >> 8);
-    opr_buf[1] = (u8)((GTP_REG_CONFIG_DATA+6) & 0xFF);
-
-    ret = gtp_i2c_read(ts->client, opr_buf, 3);
-    if (ret < 0)
-    {
-        return FAIL;
-    }
-    ts->int_trigger_type = opr_buf[2] & 0x03;
-    
-    GTP_INFO("X_MAX = %d, Y_MAX = %d, TRIGGER = 0x%02x",
-            ts->abs_x_max,ts->abs_y_max,ts->int_trigger_type);
-
-    return SUCCESS;    
-}
-#endif
-
-/*******************************************************
-Function:
-    Initialize gtp.
-Input:
-    ts: goodix private data
-Output:
-    Executive outcomes.
-        0: succeed, otherwise: failed
-*******************************************************/
-static s32 gtp_init_panel(struct goodix_ts_data *ts)
-{
-    s32 ret = -1;
-
-#if GTP_DRIVER_SEND_CFG
-    s32 i = 0;
-    u8 check_sum = 0;
-    u8 opr_buf[16] = {0};
-    u8 sensor_id = 0; 
-#if defined(CONFIG_GT9XX_TOUCHPANEL_P839T60)
-    u8 cfg_info_group1[] = CTP_CFG_GROUP1;
-    u8 cfg_info_group2[] = CTP_CFG_GROUP2;
-    u8 cfg_info_group3[] = CTP_CFG_GROUP3;
-    u8 cfg_info_group4[] = CTP_CFG_GROUP4;
-    u8 cfg_info_group5[] = CTP_CFG_GROUP5;
-    u8 cfg_info_group6[] = CTP_CFG_GROUP6;
-    u8 *send_cfg_buf[] = {cfg_info_group1, cfg_info_group2, cfg_info_group3,
-                        cfg_info_group4, cfg_info_group5, cfg_info_group6};
-    u8 cfg_info_len[] = { CFG_GROUP_LEN(cfg_info_group1),
-                          CFG_GROUP_LEN(cfg_info_group2),
-                          CFG_GROUP_LEN(cfg_info_group3),
-                          CFG_GROUP_LEN(cfg_info_group4),
-                          CFG_GROUP_LEN(cfg_info_group5),
-                          CFG_GROUP_LEN(cfg_info_group6)};
-
-    GTP_DEBUG_FUNC();
-    GTP_DEBUG("Config Groups\' Lengths: %d, %d, %d, %d, %d, %d", 
-        cfg_info_len[0], cfg_info_len[1], cfg_info_len[2], cfg_info_len[3],
-        cfg_info_len[4], cfg_info_len[5]);
-#else
-/*  modified by lilish  20150422 */
-    u8 sensor_id_temp1 = 0;
-    u8 sensor_id_temp2 = 0;
-    u8 cfg_info_group1[] = CTP_CFG_GROUP1;
-    u8 cfg_info_group2[] = CTP_CFG_GROUP2;
-    u8 cfg_info_group3[] = CTP_CFG_GROUP3;
-    u8 cfg_info_group4[] = CTP_CFG_GROUP4;
-    u8 cfg_info_group5[] = CTP_CFG_GROUP5;
-    u8 cfg_info_group6[] = CTP_CFG_GROUP6;
-
-    u8 cfg_info_group7[] = CTP_CFG_GROUP1_white;
-    u8 cfg_info_group8[] = CTP_CFG_GROUP2_white;
-    u8 cfg_info_group9[] = CTP_CFG_GROUP3_white;
-    u8 cfg_info_group10[] = CTP_CFG_GROUP4_white;
-    u8 cfg_info_group11[] = CTP_CFG_GROUP5_white;
-    u8 cfg_info_group12[] = CTP_CFG_GROUP6_white;
-
-    u8 *send_cfg_buf[] = {cfg_info_group1, cfg_info_group2, cfg_info_group3,
-                        cfg_info_group4, cfg_info_group5, cfg_info_group6,
-                         cfg_info_group7, cfg_info_group8,cfg_info_group9, 
-                        cfg_info_group10, cfg_info_group11,cfg_info_group12};
-    u8 cfg_info_len[] = { CFG_GROUP_LEN(cfg_info_group1),
-                          CFG_GROUP_LEN(cfg_info_group2),
-                          CFG_GROUP_LEN(cfg_info_group3),
-                          CFG_GROUP_LEN(cfg_info_group4),
-                          CFG_GROUP_LEN(cfg_info_group5),
-                          CFG_GROUP_LEN(cfg_info_group6),
-                          CFG_GROUP_LEN(cfg_info_group7),
-                          CFG_GROUP_LEN(cfg_info_group8),
-                          CFG_GROUP_LEN(cfg_info_group9),
-                          CFG_GROUP_LEN(cfg_info_group10),
-                          CFG_GROUP_LEN(cfg_info_group11),
-                          CFG_GROUP_LEN(cfg_info_group12)};
-
-    GTP_DEBUG_FUNC();
-    GTP_DEBUG("Config Groups\' Lengths: %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d", 
-        cfg_info_len[0], cfg_info_len[1], cfg_info_len[2], cfg_info_len[3],
-        cfg_info_len[4], cfg_info_len[5],cfg_info_len[6],cfg_info_len[7],
-        cfg_info_len[8],cfg_info_len[9],cfg_info_len[10],cfg_info_len[11]);
-/*  modified by lilish  20150422 */
-#endif
-
-#if GTP_COMPATIBLE_MODE
-    if (CHIP_TYPE_GT9F == ts->chip_type)
-    {
-        ts->fw_error = 0;
-    }
-    else
-#endif
-    {/* check firmware */
-        ret = gtp_i2c_read_dbl_check(ts->client, 0x41E4, opr_buf, 1);
-        if (SUCCESS == ret) 
-        {
-            if (opr_buf[0] != 0xBE)
-            {
-                ts->fw_error = 1;
-                GTP_ERROR("Firmware error, no config sent!");
-                return -1;
-            }
-        }
-    }
-
-    if ((!cfg_info_len[1]) && (!cfg_info_len[2]) &&
-        (!cfg_info_len[3]) && (!cfg_info_len[4]) &&
-        (!cfg_info_len[5]))
-    {
-        sensor_id = 0; 
-    }
-    else
-    {
-    #if GTP_COMPATIBLE_MODE
-        msleep(50);
-    #endif
-        ret = gtp_i2c_read_dbl_check(ts->client, GTP_REG_SENSOR_ID, &sensor_id, 1);
-        if (SUCCESS == ret)
-        {
-            if (sensor_id >= 0x06)
-            {
-                GTP_ERROR("Invalid sensor_id(0x%02X), No Config Sent!", sensor_id);
-                ts->pnl_init_error = 1;
-                return -1;
-            }
-        }
-        else
-        {
-            GTP_ERROR("Failed to get sensor_id, No config sent!");
-            ts->pnl_init_error = 1;
-            return -1;
-        }
-        GTP_INFO("Sensor_ID: %d", sensor_id);
-    }
-#if defined(CONFIG_GT9XX_TOUCHPANEL_P839T60)
-#else
-/*  modified by lilish  20150422 */
-	ret = gtp_i2c_read_dbl_check(ts->client, 0x810A, &sensor_id_temp1, 1);
-	GTP_INFO("Sensor_ID_temp1: %d", sensor_id_temp1);
-	if (SUCCESS == ret)
-    {
-	 	ret = gtp_i2c_read_dbl_check(ts->client, 0x810B, &sensor_id_temp2, 1);
-	 	GTP_INFO("Sensor_ID_temp2: %d", sensor_id_temp2);
-	 	if (SUCCESS == ret)
-       	{
-       		if((sensor_id_temp1 == 0x57) && (sensor_id_temp2 == 0x02))
-       		{
-       			sensor_id = sensor_id + 6;//white config
-       			GTP_INFO("Sensor_ID: %d", sensor_id);
-       		}
-       		else
-       		{
-       			GTP_INFO("Sensor_ID: %d", sensor_id);
-       		}
-      	}
-      	else
-      	{
-      		GTP_ERROR("Failed to get sensor_id_temp2, No config sent!");
-      		ts->pnl_init_error = 1;
-          	return -1;
-      	}
-	}
-	else
-	{
-	 	GTP_ERROR("Failed to get sensor_id_temp1, No config sent!");
-      	ts->pnl_init_error = 1;
-        return -1;
-	}
-/*  modified by lilish  20150422 */  
-#endif
-//add by yujianhua begin
-    gt9xx_sensor_id=sensor_id;
-//add by yujianhua end
-    ts->gtp_cfg_len = cfg_info_len[sensor_id];
-    GTP_INFO("CTP_CONFIG_GROUP%d used, config length: %d", sensor_id + 1, ts->gtp_cfg_len);
-
-    if (ts->gtp_cfg_len < GTP_CONFIG_MIN_LENGTH)
-    {
-        GTP_ERROR("Config Group%d is INVALID CONFIG GROUP(Len: %d)! NO Config Sent! You need to check you header file CFG_GROUP section!", sensor_id+1, ts->gtp_cfg_len);
-        ts->pnl_init_error = 1;
-        return -1;
-    }
-
-#if GTP_COMPATIBLE_MODE
-    if (CHIP_TYPE_GT9F == ts->chip_type)
-    {
-        ts->fixed_cfg = 0;
-    }
-    else
-#endif
-    {
-        ret = gtp_i2c_read_dbl_check(ts->client, GTP_REG_CONFIG_DATA, &opr_buf[0], 1);
-        
-        if (ret == SUCCESS)
-        {
-            GTP_DEBUG("CFG_GROUP%d Config Version: %d, 0x%02X; IC Config Version: %d, 0x%02X", sensor_id+1,
-                        send_cfg_buf[sensor_id][0], send_cfg_buf[sensor_id][0], opr_buf[0], opr_buf[0]);
-
-            if (opr_buf[0] < 90)
-            {
-                grp_cfg_version = send_cfg_buf[sensor_id][0];       // backup group config version
-                send_cfg_buf[sensor_id][0] = 0x00;
-                ts->fixed_cfg = 0;
-            }
-            else        // treated as fixed config, not send config
-            {
-                GTP_INFO("Ic fixed config with config version(%d, 0x%02X)", opr_buf[0], opr_buf[0]);
-                ts->fixed_cfg = 1;
-                gtp_get_info(ts);
-                return 0;
-            }
-        }
-        else
-        {
-            GTP_ERROR("Failed to get ic config version!No config sent!");
-            return -1;
-        }
-    }
-
-    memset(&config[GTP_ADDR_LENGTH], 0, GTP_CONFIG_MAX_LENGTH);
-    memcpy(&config[GTP_ADDR_LENGTH], send_cfg_buf[sensor_id], ts->gtp_cfg_len);
-
-#if GTP_CUSTOM_CFG
-    config[RESOLUTION_LOC]     = (u8)GTP_MAX_WIDTH;
-    config[RESOLUTION_LOC + 1] = (u8)(GTP_MAX_WIDTH>>8);
-    config[RESOLUTION_LOC + 2] = (u8)GTP_MAX_HEIGHT;
-    config[RESOLUTION_LOC + 3] = (u8)(GTP_MAX_HEIGHT>>8);
-
-    if (GTP_INT_TRIGGER == 0)  //RISING
-    {
-        config[TRIGGER_LOC] &= 0xfe; 
-    }
-    else if (GTP_INT_TRIGGER == 1)  //FALLING
-    {
-        config[TRIGGER_LOC] |= 0x01;
-    }
-#endif  // GTP_CUSTOM_CFG
-
-    check_sum = 0;
-    for (i = GTP_ADDR_LENGTH; i < ts->gtp_cfg_len; i++)
-    {
-        check_sum += config[i];
-    }
-    config[ts->gtp_cfg_len] = (~check_sum) + 1;
-
-#else // driver not send config
-
-    ts->gtp_cfg_len = GTP_CONFIG_MAX_LENGTH;
-    ret = gtp_i2c_read(ts->client, config, ts->gtp_cfg_len + GTP_ADDR_LENGTH);
-    if (ret < 0)
-    {
-        GTP_ERROR("Read Config Failed, Using Default Resolution & INT Trigger!");
-        ts->abs_x_max = GTP_MAX_WIDTH;
-        ts->abs_y_max = GTP_MAX_HEIGHT;
-        ts->int_trigger_type = GTP_INT_TRIGGER;
-    }
-
-#endif // GTP_DRIVER_SEND_CFG
-
-    if ((ts->abs_x_max == 0) && (ts->abs_y_max == 0))
-    {
-        ts->abs_x_max = (config[RESOLUTION_LOC + 1] << 8) + config[RESOLUTION_LOC];
-        ts->abs_y_max = (config[RESOLUTION_LOC + 3] << 8) + config[RESOLUTION_LOC + 2];
-        ts->int_trigger_type = (config[TRIGGER_LOC]) & 0x03; 
-    }
-
-#if GTP_COMPATIBLE_MODE
-    if (CHIP_TYPE_GT9F == ts->chip_type)
-    {
-        u8 sensor_num = 0;
-        u8 driver_num = 0;
-        u8 have_key = 0;
-
-        have_key = (config[GTP_REG_HAVE_KEY - GTP_REG_CONFIG_DATA + 2] & 0x01);
-
-        if (1 == ts->is_950)
-        {
-            driver_num = config[GTP_REG_MATRIX_DRVNUM - GTP_REG_CONFIG_DATA + 2];
-            sensor_num = config[GTP_REG_MATRIX_SENNUM - GTP_REG_CONFIG_DATA + 2];
-            if (have_key)
-            {
-                driver_num--;
-            }
-            ts->bak_ref_len = (driver_num * (sensor_num - 1) + 2) * 2 * 6;
-        }
-        else
-        {
-            driver_num = (config[CFG_LOC_DRVA_NUM] & 0x1F) + (config[CFG_LOC_DRVB_NUM]&0x1F);
-            if (have_key)
-            {
-                driver_num--;
-            }
-            sensor_num = (config[CFG_LOC_SENS_NUM] & 0x0F) + ((config[CFG_LOC_SENS_NUM] >> 4) & 0x0F);
-            ts->bak_ref_len = (driver_num * (sensor_num - 2) + 2) * 2;
-        }
-
-        GTP_INFO("Drv * Sen: %d * %d(key: %d), X_MAX: %d, Y_MAX: %d, TRIGGER: 0x%02x",
-           driver_num, sensor_num, have_key, ts->abs_x_max,ts->abs_y_max,ts->int_trigger_type);
-        return 0;
-    }
-    else
-#endif
-    {
-    #if GTP_DRIVER_SEND_CFG
-        ret = gtp_send_cfg(ts->client);
-        if (ret < 0)
-        {
-            GTP_ERROR("Send config error.");
-        }
-        // set config version to CTP_CFG_GROUP, for resume to send config
-        config[GTP_ADDR_LENGTH] = grp_cfg_version;
-        check_sum = 0;
-        for (i = GTP_ADDR_LENGTH; i < ts->gtp_cfg_len; i++)
-        {
-            check_sum += config[i];
-        }
-        config[ts->gtp_cfg_len] = (~check_sum) + 1;
-    #endif
-        GTP_INFO("X_MAX: %d, Y_MAX: %d, TRIGGER: 0x%02x", ts->abs_x_max,ts->abs_y_max,ts->int_trigger_type);
-    }
-
-    msleep(10);
-#if 0
-	/*[BUGFIX] ADD begin by TCTSZ-WH,2014-5-14,Show TP config version*/
-	ret = gtp_i2c_read_dbl_check(ts->client, GTP_REG_CONFIG_DATA,
-			&grp_cfg_version, 1);
-	if(SUCCESS != ret)
-	{
-		 GTP_ERROR("Failed to get ic config version!");
-	}
-#endif
-	/*[BUGFIX] ADD begin by TCTSZ-WH,2014-5-14,Show TP config version*/
-
-	//g_tp_cfg_ver = grp_cfg_version;
-    return 0;
-}
-
 
 static ssize_t gt91xx_config_read_proc(struct file *file, char __user *page, size_t size, loff_t *ppos)
 {
@@ -3183,9 +3196,11 @@ static int touch_config_proc_show(struct seq_file *m, void *v)
 		break;
 #else
 	case 0x0:
+	case 0x6:
 		seq_printf(m,  "module : %s (0x%x)\n", "GT9XX + junda", grp_cfg_version);//junda
 		break;
 	case 0x1:	
+    case 0x7:	
 		seq_printf(m,  "module : %s (0x%x)\n", "GT9XX + yeji", grp_cfg_version);//yeji
 		break;
 #endif
@@ -3312,6 +3327,202 @@ static ssize_t goodix_set_sensor_id(struct device *dev, struct device_attribute 
 {
     return size;
 }
+#if defined(V55_SFR_HUOER)
+static s32 gtp_reset_panel(struct goodix_ts_data *ts)
+{
+    s32 ret = -1;
+    s32 i = 0;
+    u8 check_sum = 0;
+    u8 opr_buf[16] = {0};
+    u8 sensor_id = 0;
+    if(gt9xx_sensor_id < 4 || (gt9xx_sensor_id > 5 && gt9xx_sensor_id < 10))//last status is open
+	{
+	    if(g_is_cover_touchscreen == 0)//close
+		{
+		    sensor_id  = gt9xx_sensor_id + 4;
+		}
+		else
+		{
+		    sensor_id  = gt9xx_sensor_id;
+		}
+	}
+	else//close
+	{
+	    if(g_is_cover_touchscreen == 1)//open
+		{
+		    sensor_id = gt9xx_sensor_id - 4;
+		}
+		else
+		{
+		    sensor_id  = gt9xx_sensor_id;
+		}
+	}
+	last_cover_status = g_is_cover_touchscreen;
+    ts->gtp_cfg_len = cfg_info_len[sensor_id];
+    GTP_INFO("gtp_reset_panel,CTP_CONFIG_GROUP%d used, config length: %d", sensor_id + 1, ts->gtp_cfg_len);
+
+    if (ts->gtp_cfg_len < GTP_CONFIG_MIN_LENGTH)
+    {
+        GTP_ERROR("gtp_reset_panel,Config Group%d is INVALID CONFIG GROUP(Len: %d)! NO Config Sent! You need to check you header file CFG_GROUP section!", sensor_id+1, ts->gtp_cfg_len);
+        ts->pnl_init_error = 1;
+        return -1;
+    }
+
+#if GTP_COMPATIBLE_MODE
+    if (CHIP_TYPE_GT9F == ts->chip_type)
+    {
+        ts->fixed_cfg = 0;
+    }
+    else
+#endif
+    {
+        ret = gtp_i2c_read_dbl_check(ts->client, GTP_REG_CONFIG_DATA, &opr_buf[0], 1);
+        
+        if (ret == SUCCESS)
+        {
+            GTP_INFO("gtp_reset_panel,CFG_GROUP%d Config Version: %d, 0x%02X; IC Config Version: %d, 0x%02X", sensor_id+1,
+                        send_cfg_buf[sensor_id][0], send_cfg_buf[sensor_id][0], opr_buf[0], opr_buf[0]);
+
+            if (opr_buf[0] < 90)
+            {
+                //grp_cfg_version = send_cfg_buf[sensor_id][0];       // backup group config version
+                send_cfg_buf[sensor_id][0] = 0x00;
+                ts->fixed_cfg = 0;
+            }
+            else        // treated as fixed config, not send config
+            {
+                GTP_INFO("gtp_reset_panel,Ic fixed config with config version(%d, 0x%02X)", opr_buf[0], opr_buf[0]);
+                //ts->fixed_cfg = 1;
+				ts->fixed_cfg = 0;
+                //gtp_get_info(ts);
+                //return 0;
+            }
+			grp_cfg_version = send_cfg_buf[sensor_id][0];       // backup group config version
+        }
+        else
+        {
+            GTP_ERROR("gtp_reset_panel,Failed to get ic config version!No config sent!");
+            return -1;
+        }
+    }
+
+    memset(&config[GTP_ADDR_LENGTH], 0, GTP_CONFIG_MAX_LENGTH);
+    memcpy(&config[GTP_ADDR_LENGTH], send_cfg_buf[sensor_id], ts->gtp_cfg_len);
+
+#if GTP_CUSTOM_CFG
+    config[RESOLUTION_LOC]     = (u8)GTP_MAX_WIDTH;
+    config[RESOLUTION_LOC + 1] = (u8)(GTP_MAX_WIDTH>>8);
+    config[RESOLUTION_LOC + 2] = (u8)GTP_MAX_HEIGHT;
+    config[RESOLUTION_LOC + 3] = (u8)(GTP_MAX_HEIGHT>>8);
+
+    if (GTP_INT_TRIGGER == 0)  //RISING
+    {
+        config[TRIGGER_LOC] &= 0xfe; 
+    }
+    else if (GTP_INT_TRIGGER == 1)  //FALLING
+    {
+        config[TRIGGER_LOC] |= 0x01;
+    }
+#endif  // GTP_CUSTOM_CFG
+
+    check_sum = 0;
+    for (i = GTP_ADDR_LENGTH; i < ts->gtp_cfg_len; i++)
+    {
+        check_sum += config[i];
+    }
+    config[ts->gtp_cfg_len] = (~check_sum) + 1;
+
+    if ((ts->abs_x_max == 0) && (ts->abs_y_max == 0))
+    {
+        ts->abs_x_max = (config[RESOLUTION_LOC + 1] << 8) + config[RESOLUTION_LOC];
+        ts->abs_y_max = (config[RESOLUTION_LOC + 3] << 8) + config[RESOLUTION_LOC + 2];
+        ts->int_trigger_type = (config[TRIGGER_LOC]) & 0x03; 
+    }
+
+#if GTP_COMPATIBLE_MODE
+    if (CHIP_TYPE_GT9F == ts->chip_type)
+    {
+        u8 sensor_num = 0;
+        u8 driver_num = 0;
+        u8 have_key = 0;
+
+        have_key = (config[GTP_REG_HAVE_KEY - GTP_REG_CONFIG_DATA + 2] & 0x01);
+
+        if (1 == ts->is_950)
+        {
+            driver_num = config[GTP_REG_MATRIX_DRVNUM - GTP_REG_CONFIG_DATA + 2];
+            sensor_num = config[GTP_REG_MATRIX_SENNUM - GTP_REG_CONFIG_DATA + 2];
+            if (have_key)
+            {
+                driver_num--;
+            }
+            ts->bak_ref_len = (driver_num * (sensor_num - 1) + 2) * 2 * 6;
+        }
+        else
+        {
+            driver_num = (config[CFG_LOC_DRVA_NUM] & 0x1F) + (config[CFG_LOC_DRVB_NUM]&0x1F);
+            if (have_key)
+            {
+                driver_num--;
+            }
+            sensor_num = (config[CFG_LOC_SENS_NUM] & 0x0F) + ((config[CFG_LOC_SENS_NUM] >> 4) & 0x0F);
+            ts->bak_ref_len = (driver_num * (sensor_num - 2) + 2) * 2;
+        }
+
+        GTP_INFO("Drv * Sen: %d * %d(key: %d), X_MAX: %d, Y_MAX: %d, TRIGGER: 0x%02x",
+           driver_num, sensor_num, have_key, ts->abs_x_max,ts->abs_y_max,ts->int_trigger_type);
+        return 0;
+    }
+    else
+#endif
+    {
+    #if GTP_DRIVER_SEND_CFG
+        ret = gtp_send_cfg(ts->client);
+        if (ret < 0)
+        {
+            GTP_ERROR("gtp_reset_panel,Send config error.");
+        }
+        // set config version to CTP_CFG_GROUP, for resume to send config
+        config[GTP_ADDR_LENGTH] = grp_cfg_version;
+        check_sum = 0;
+        for (i = GTP_ADDR_LENGTH; i < ts->gtp_cfg_len; i++)
+        {
+            check_sum += config[i];
+        }
+        config[ts->gtp_cfg_len] = (~check_sum) + 1;
+    #endif
+        GTP_INFO("gtp_reset_panel,X_MAX: %d, Y_MAX: %d, TRIGGER: 0x%02x", ts->abs_x_max,ts->abs_y_max,ts->int_trigger_type);
+    }
+
+    msleep(10);
+    return 0;
+}
+static ssize_t goodix_get_g_cover_status(struct device *dev, struct device_attribute *attr, char *buf)
+{
+    int enable = last_cover_status;
+    return snprintf(buf, sizeof(enable) + 2, "%d\n", enable);
+}
+
+static ssize_t goodix_set_g_cover_status(struct device *dev, struct device_attribute *attr,
+                             const char *buf, size_t size)
+{
+    struct goodix_ts_data *drvdata= dev_get_drvdata(dev);
+    unsigned long enable = 0;
+
+    if (strict_strtoul(buf, 16, &enable))
+        return -EINVAL;
+
+	if (enable != last_cover_status) {
+	    g_is_cover_touchscreen = enable;
+		//gtp_init_panel(drvdata);
+		gtp_reset_panel(drvdata);
+		msleep(400);
+        //enable_irq_wake(drvdata->client->irq);
+	}
+
+    return size;
+}
+#endif
 #endif
 static DEVICE_ATTR(enable_palm_sleep, 0664, goodix_get_palm_sleep, goodix_set_palm_sleep);
 static DEVICE_ATTR(enable_gesture_wakeup, 0664, goodix_get_gesture_wakeup, goodix_set_gesture_wakeup);
@@ -3320,6 +3531,9 @@ static DEVICE_ATTR(enable_gesture_wakeup, 0664, goodix_get_gesture_wakeup, goodi
 #if defined(CONFIG_GT9XX_TOUCHPANEL_P839T60)
 #else
 static DEVICE_ATTR(info_sensor_id, 0664, goodix_get_sensor_id, goodix_set_sensor_id);
+#if defined(V55_SFR_HUOER)
+static DEVICE_ATTR(g_cover_status, 0666, goodix_get_g_cover_status, goodix_set_g_cover_status);
+#endif
 #endif
 /*******************************************************
 Function:
@@ -3582,6 +3796,13 @@ printk(">>-- %s line:%d, ret=%d \n", __func__, __LINE__, ret);
         dev_err(&client->dev, "GTP create dev_attr_info_sensor_id failed\n");
         device_remove_file(&client->dev, &dev_attr_info_sensor_id);
     }
+#if defined(V55_SFR_HUOER)
+	ret = device_create_file(&client->dev, &dev_attr_g_cover_status);
+    if (ret) {
+        dev_err(&client->dev, "GTP create dev_attr_g_cover_status failed\n");
+        device_remove_file(&client->dev, &dev_attr_g_cover_status);
+    }
+#endif
 #endif
     return 0;
 }

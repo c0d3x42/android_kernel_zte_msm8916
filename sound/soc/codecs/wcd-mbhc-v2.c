@@ -1117,6 +1117,14 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 			plug_type = MBHC_PLUG_TYPE_HEADSET;
 			goto report;
 		}
+              else{
+                    pr_debug("%s: liyang Special headset found %d\n",
+					__func__, plug_type);
+                	plug_type = MBHC_PLUG_TYPE_HEADSET;
+
+			goto report;
+            }
+        
 	}
 
 report:
@@ -2165,7 +2173,7 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 		MICBIAS_EXT_BYP_CAP : MICBIAS_NO_EXT_BYP_CAP);
 
        mbhc->micbias1_cap_mode = MICBIAS_NO_EXT_BYP_CAP;  
-       mbhc->micbias2_cap_mode = MICBIAS_NO_EXT_BYP_CAP;
+       mbhc->micbias2_cap_mode = MICBIAS_NO_EXT_BYP_CAP;//zte  liyang  for no cap in mic 
 
 	mbhc->in_swch_irq_handler = false;
 	mbhc->current_plug = MBHC_PLUG_TYPE_NONE;

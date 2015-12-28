@@ -26,6 +26,10 @@
 
 //#define AH1898_IRQ 11
 
+static int hall_status = 1;
+
+module_param(hall_status, int, 0644);
+
 struct ah1898_chip {
 
 	//struct mutex lock;
@@ -49,13 +53,13 @@ static void ah1898_work_func(struct work_struct * work)
 
 	value=gpio_get_value(ah1898_chip_data->irq);	
 
-	printk("%s:chenhui test value=%d, enabled = %d\n",__func__,value, ah1898_chip_data->ah1898_enabled);
+	printk("%s:hall test value=%d, enabled = %d\n",__func__,value, ah1898_chip_data->ah1898_enabled);
 
 	if(ah1898_chip_data->ah1898_enabled==1){
 
 	if(value==1){
 		//log for off
-			printk("%s:chenhui ===switch is off!!the value = %d\n",__func__,value);
+			printk("%s:hall ===switch is off!!the value = %d\n",__func__,value);
 /* delete KEY_POWER input report 			
 			input_report_key(ah1898_chip_data->input, KEY_POWER, 1);
 			input_sync(ah1898_chip_data->input);		
@@ -64,9 +68,10 @@ static void ah1898_work_func(struct work_struct * work)
 			input_report_key(ah1898_chip_data->input, KEY_HALL_SENSOR_UP, 1);
 			input_sync(ah1898_chip_data->input);
 			input_report_key(ah1898_chip_data->input, KEY_HALL_SENSOR_UP, 0);
+			hall_status=1;
 		} else {	
 		//log for on		
-			printk("%s:chenhui ===switch is on!!the value = %d\n",__func__,value);
+			printk("%s:hall ===switch is on!!the value = %d\n",__func__,value);
 /* delete KEY_POWER input report			
 			input_report_key(ah1898_chip_data->input, KEY_POWER, 1);
 			input_sync(ah1898_chip_data->input);		
@@ -75,6 +80,7 @@ static void ah1898_work_func(struct work_struct * work)
 			input_report_key(ah1898_chip_data->input, KEY_HALL_SENSOR_DOWN, 1);
 			input_sync(ah1898_chip_data->input);
 			input_report_key(ah1898_chip_data->input, KEY_HALL_SENSOR_DOWN, 0);
+			hall_status=0;
 		}
 		input_sync(ah1898_chip_data->input);
 	}
@@ -115,6 +121,7 @@ int ah1898_parse_dt(struct platform_device *pdev)
 
 static int  ah1898_probe(struct platform_device *pdev)
 {
+	int value_status;
 
 	int error = 0;
 	int irq=0;
@@ -189,7 +196,19 @@ static int  ah1898_probe(struct platform_device *pdev)
 	}
 	
 	ah1898_chip_data->ah1898_enabled=1;
-	printk(KERN_INFO "++++++++ah1898_probe ok!\n");
+//init hall status 
+	value_status =gpio_get_value(ah1898_chip_data->irq);	
+
+	if(value_status==1) {
+		hall_status=1;
+	} else {
+		hall_status=0;
+	}
+	
+       printk("hall Init hall_state=%d \n",hall_status);
+	   
+	printk("%s:hall Init success!\n",__func__);
+	
 	return 0;
 
 fail2	:
@@ -219,7 +238,7 @@ static int ah1898_remove(struct platform_device *pdev)
 
 
 static struct of_device_id ah1898_hall_of_match[] = {
-	{.compatible = "ah,ah1898", },
+	{.compatible = "ah,hall_ic", },
 	{},
 };
 
@@ -228,7 +247,7 @@ static struct platform_driver ah1898_hall_driver = {
         .probe=ah1898_probe,
         .remove=ah1898_remove,
         .driver= {
-		.name= "ah1898",
+		.name= "hall_ic",
 		.owner= THIS_MODULE,
 		.of_match_table = ah1898_hall_of_match,
 		//.pm = &led_pm_ops,

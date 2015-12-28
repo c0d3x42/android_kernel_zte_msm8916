@@ -36,16 +36,19 @@
 #include <linux/pstore_ram.h>
 
 #define RAMOOPS_KERNMSG_HDR "===="
+/* ZSW Modified from 4096UL to 1048576UL*/
+/*
 #define MIN_MEM_SIZE 4096UL
+*/
+#define MIN_MEM_SIZE 1048576UL
+
 
 static ulong record_size = MIN_MEM_SIZE;
 module_param(record_size, ulong, 0400);
 MODULE_PARM_DESC(record_size,
 		"size of each dump done on oops/panic");
 
-//static ulong ramoops_console_size = MIN_MEM_SIZE;
-static ulong ramoops_console_size = 256*1024UL;
-
+static ulong ramoops_console_size = MIN_MEM_SIZE;
 module_param_named(console_size, ramoops_console_size, ulong, 0400);
 MODULE_PARM_DESC(console_size, "size of kernel console log");
 
@@ -53,15 +56,21 @@ static ulong ramoops_ftrace_size = MIN_MEM_SIZE;
 module_param_named(ftrace_size, ramoops_ftrace_size, ulong, 0400);
 MODULE_PARM_DESC(ftrace_size, "size of ftrace log");
 
-//static ulong mem_address;
-static ulong mem_address=0x85000000;
-
+/* ZSW Modified to 0x85000000, same as defined in SBL1 and aboot */
+/*
+static ulong mem_address;
+*/
+static ulong mem_address = 0x85000000;
 module_param(mem_address, ulong, 0400);
 MODULE_PARM_DESC(mem_address,
 		"start of reserved RAM used to store oops/panic logs");
 
-//static ulong mem_size;
-static ulong mem_size = 0x00100000;
+/* ZSW Modified to 0x100000, same as defined in SBL1 and aboot */
+/*
+static ulong mem_size;
+*/
+static ulong mem_size = 0x100000;
+
 module_param(mem_size, ulong, 0400);
 MODULE_PARM_DESC(mem_size,
 		"size of reserved RAM used to store oops/panic logs");
@@ -376,7 +385,10 @@ static int ramoops_init_prz(struct device *dev, struct ramoops_context *cxt,
 		return err;
 	}
 
+       /* ZSW deleted, save SBL1 and aboot logs in the console buffer */
+       /*
 	persistent_ram_zap(*prz);
+	*/
 
 	*paddr += sz;
 
@@ -438,20 +450,28 @@ static int ramoops_probe(struct platform_device *pdev)
 
 	paddr = cxt->phys_addr;
 
+       /* ZSW deleted */
+       if(0)
+       {
 	dump_mem_sz = cxt->size - cxt->console_size - cxt->ftrace_size;
 	err = ramoops_init_przs(dev, cxt, &paddr, dump_mem_sz);
 	if (err)
 		goto fail_out;
+       }
 
 	err = ramoops_init_prz(dev, cxt, &cxt->cprz, &paddr,
 			       cxt->console_size, 0);
 	if (err)
 		goto fail_init_cprz;
 
+       /* ZSW deleted */
+       if(0)
+       {
 	err = ramoops_init_prz(dev, cxt, &cxt->fprz, &paddr, cxt->ftrace_size,
 			       LINUX_VERSION_CODE);
 	if (err)
 		goto fail_init_fprz;
+       }
 
 	if (!cxt->przs && !cxt->cprz && !cxt->fprz) {
 		pr_err("memory size too small, minimum is %zu\n",

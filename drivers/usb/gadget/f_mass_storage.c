@@ -357,9 +357,11 @@ struct fsg_dev {
 	struct usb_ep		*bulk_in;
 	struct usb_ep		*bulk_out;
 };
+//ztebsp zhangjing add for mac cdrom, ++,20120604
 static int scsi_build_toc_format0(u8* buf, int msf, int start_track, struct fsg_lun *curlun);
 static int scsi_build_toc_format1(u8* buf, int msf, int start_track, struct fsg_lun *curlun);
 static int scsi_build_toc_format2(u8* buf, int msf, struct fsg_lun *curlun);
+//ztebsp zhangjing add for mac cdrom, --,20120604
 
 static inline int __fsg_is_set(struct fsg_common *common,
 			       const char *func, unsigned line)
@@ -870,6 +872,7 @@ static int do_write(struct fsg_common *common)
 			curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
 			return -EINVAL;
 		}
+		//ztebsp zhangjing add for mac cdrom, ++,20120604
 		
 		#if 1
 		if (common->cmnd[1] & 0x08) {	/* FUA */
@@ -877,6 +880,7 @@ static int do_write(struct fsg_common *common)
 		if (!curlun->nofua && (common->cmnd[1] & 0x08)) { /* FUA */
 		#endif
 			
+		//ztebsp zhangjing add for mac cdrom, --,20120604
 			spin_lock(&curlun->filp->f_lock);
 			curlun->filp->f_flags |= O_SYNC;
 			spin_unlock(&curlun->filp->f_lock);
@@ -1208,6 +1212,7 @@ static int do_verify(struct fsg_common *common)
 	}
 	return 0;
 }
+//ztebsp zhangjing add for mac cdrom, ++,20120604
 #if 1
 
 struct ms_get_configration_data_header_type {
@@ -1310,6 +1315,7 @@ static int do_get_configuration(struct fsg_common *common ,struct fsg_buffhd *bh
      return reply_len;
 }
 #endif
+//ztebsp zhangjing add for mac cdrom, --,20120604
 /*-------------------------------------------------------------------------*/
 
 static int do_inquiry(struct fsg_common *common, struct fsg_buffhd *bh)
@@ -1431,6 +1437,7 @@ static int do_read_header(struct fsg_common *common, struct fsg_buffhd *bh)
 	return 8;
 }
 
+//ztebsp zhangjing add for mac cdrom, ++,20120604
 #if 0
 static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
 {
@@ -1462,21 +1469,25 @@ static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
 
 #define SCSI_FLAG_SESSION_LEAD_OUT    0xAA
 #define SCSI_FLAG_TOC_MASK_FORMAT     0xC0
+//ztebsp zhangjing add for mac cdrom, --,20120604
 static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
 {
 	struct fsg_lun	*curlun = common->curlun;
 	int		msf = common->cmnd[1] & 0x02;
 	int		start_track = common->cmnd[6];
 	u8		*buf = (u8 *)bh->buf;
+	//ztebsp zhangjing add for mac cdrom, ++,20120604
 	u8      format= common->cmnd[2]&0xf;
 	u8 		control=common->cmnd[9];
 	u8 		reply_size=0;
+       //ztebsp zhangjing add for mac cdrom, --,20120604
 
 	if ((common->cmnd[1] & ~0x02) != 0 ||	/* Mask away MSF */
 			start_track > 1) {
 		curlun->sense_data = SS_INVALID_FIELD_IN_CDB;
 		return -EINVAL;
 	}
+	//ztebsp zhangjing add for mac cdrom, ++,20120604
 	switch (format)
     	{	
         	case 0:  // format 0
@@ -1484,6 +1495,7 @@ static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
             	if ((control&SCSI_FLAG_TOC_MASK_FORMAT) == 0) 					
             	{   
 			#if 0
+	//ztebsp zhangjing add for mac cdrom, --,20120604
 	memset(buf, 0, 20);
 	buf[1] = (20-2);		/* TOC data length */
 	buf[2] = 1;			/* First track number */
@@ -1496,6 +1508,7 @@ static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
 	buf[14] = 0xAA;			/* Lead-out track number */
 	store_cdrom_address(&buf[16], msf, curlun->num_sectors);
 	return 20;
+			//ztebsp zhangjing add for mac cdrom, ++,20120604
 			#endif
 			reply_size=scsi_build_toc_format0(buf,msf,start_track,curlun);
             	}
@@ -1550,7 +1563,9 @@ static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
     	}
 
 	return reply_size;
+	//ztebsp zhangjing add for mac cdrom, --,20120604
 }
+//ztebsp zhangjing add for mac cdrom, ++,20120604
 /*---------------------------------------
  scsi response data type
 -----------------------------------------*/
@@ -1725,6 +1740,7 @@ static int scsi_build_toc_format2(u8* buf, int msf, struct fsg_lun *curlun)
 }
 
 #endif
+//ztebsp zhangjing add for mac cdrom, --,20120604
 static int do_mode_sense(struct fsg_common *common, struct fsg_buffhd *bh)
 {
 	struct fsg_lun	*curlun = common->curlun;
@@ -1761,11 +1777,13 @@ static int do_mode_sense(struct fsg_common *common, struct fsg_buffhd *bh)
 		buf += 4;
 		limit = 255;
 	} else {			/* MODE_SENSE_10 */
+              //ztebsp zhangjing add for mac cdrom, ++,20120604
 #if 1
 		buf[3] = 0x00;		/* WP, DPOFUA */
 #else
 		buf[3] = (curlun->ro ? 0x80 : 0x00);		/* WP, DPOFUA */
 #endif
+		//ztebsp zhangjing add for mac cdrom, --,20120604
 		buf += 8;
 		limit = 65535;		/* Should really be FSG_BUFLEN */
 	}
@@ -1776,6 +1794,7 @@ static int do_mode_sense(struct fsg_common *common, struct fsg_buffhd *bh)
 	 * The mode pages, in numerical order.  The only page we support
 	 * is the Caching page.
 	 */
+//ztebsp zhangjing add for mac cdrom, ++,20120604
 #if 1
 	valid_page = 1;
 #else
@@ -1800,6 +1819,7 @@ static int do_mode_sense(struct fsg_common *common, struct fsg_buffhd *bh)
 		buf += 12;
 	}
 #endif
+	//ztebsp zhangjing add for mac cdrom, --,20120604
 	/*
 	 * Check that a valid page was requested and the mode data length
 	 * isn't too long.
@@ -2488,19 +2508,23 @@ static int do_scsi_command(struct fsg_common *common)
 		break;
 
 	case READ_TOC:
+		//ztebsp zhangjing add for mac cdrom, ++,20120604
 #if 1
 #else
 		if (!common->curlun || !common->curlun->cdrom)
 			goto unknown_cmnd;
 #endif
+		//ztebsp zhangjing add for mac cdrom, --,20120604
 		common->data_size_from_cmnd =
 			get_unaligned_be16(&common->cmnd[7]);
 		reply = check_command(common, 10, DATA_DIR_TO_HOST,
+					//ztebsp zhangjing add for mac cdrom, ++,20120604
 #if 1
 				      (0xf<<6) | (3<<1), 1,	
 #else
 				      (7<<6) | (1<<1), 1,
 #endif
+					//ztebsp zhangjing add for mac cdrom, --,20120604				  
 				      "READ TOC");
 		if (reply == 0)
 			reply = do_read_toc(common, bh);
@@ -2595,6 +2619,7 @@ static int do_scsi_command(struct fsg_common *common)
 		if (reply == 0)
 			reply = do_write(common);
 		break;
+	//ztebsp zhangjing add for mac cdrom, ++,20120604
 #if 1
 	case SC_GET_CONFIGRATION:
 		common->data_size_from_cmnd = 
@@ -2604,6 +2629,7 @@ static int do_scsi_command(struct fsg_common *common)
          	reply=do_get_configuration(common,bh);
  		break;
 #endif
+	//ztebsp zhangjing add for mac cdrom, --,20120604
 	/*
 	 * Some mandatory commands that we recognize but don't implement.
 	 * They don't mean much in this setting.  It's left as an exercise
@@ -2617,6 +2643,7 @@ static int do_scsi_command(struct fsg_common *common)
 #if 1
 	case SC_SET_CD_SPEED:
 #endif
+	//ztebsp zhangjing add for mac cdrom, --,20120604
 		/* Fall through */
 
 	default:
@@ -3224,6 +3251,7 @@ static int create_lun_device(struct fsg_common *common,
 
 	for (i = add_lun_index; i < nluns; ++i, ++curlun, ++lcfg) {
 		curlun->cdrom = !!lcfg->cdrom;
+//ztebsp zhangjing add for mac cdrom, ++,20120604
 #if 1
 		curlun->ro = 0;
 #else

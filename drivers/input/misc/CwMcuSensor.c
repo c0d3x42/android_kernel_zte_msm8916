@@ -203,44 +203,53 @@ static int CWMCU_write_serial(u8 *data, int len)
 static int CWMCU_read_serial(u8 *data, int len)
 {
 	int dummy;
+	
+	mutex_lock(&cwmcu_lock);
 	dummy = i2c_master_recv(sensor->client, data, len);
 	if (dummy < 0) {
 		pr_err("--CWMCU-- %s i2c read error : %d\n", __func__, dummy);
+		mutex_unlock(&cwmcu_lock);
 		return dummy;
 	}
+	mutex_unlock(&cwmcu_lock);
 	return 0;
 }
 
 static void cwmcu_powermode_switch(SWITCH_POWER_ID id, int onoff)
 {
+	mutex_lock(&cwmcu_lock);
+
 	if (onoff) {
 		if (sensor->power_on_list == 0) {
 			gpio_set_value(sensor->wakeup_gpio, onoff);
 		}
 		sensor->power_on_list |= ((uint32_t)(1) << id);
 		VERBOSE("--CWMCU--%s id = %d, onoff = %d\n", __func__, id, onoff);
-		usleep_range(1000, 2000);
+		//usleep_range(1000, 2000);
+		usleep(500);
 	} else {
 		sensor->power_on_list &= ~(1 << id);
 		if (sensor->power_on_list == 0) {
 			gpio_set_value(sensor->wakeup_gpio, onoff);
 		}
+		usleep(40);
 		VERBOSE("--CWMCU--%s id = %d, onoff = %d\n", __func__, id, onoff);
 	}
+	mutex_unlock(&cwmcu_lock);
 }
 
 static int cwmcu_get_version(void)
 {
     int ret;
     uint8_t count;
-    uint8_t data[6] = {0};
+    uint8_t data[3] = {0};
 
     VERBOSE("--CWMCU-- %s\n", __func__);
 
 	cwmcu_powermode_switch(SWITCH_POWER_NORMAL, 1);
     for (count = 0; count < 3; count++) {
-        if ((ret = CWMCU_i2c_read(sensor, CW_FWVERSION, data, 2)) >= 0) {
-            VERBOSE("--CWMCU-- CHECK_FIRMWAVE_VERSION : %d.%d\n", data[0],data[1]);
+        if ((ret = CWMCU_i2c_read(sensor, CW_FWVERSION, data, 3)) >= 0) {
+            VERBOSE("--CWMCU-- CHECK_FIRMWAVE_VERSION : %d.%d.%d\n", data[0], data[1], data[2]);
             cwmcu_powermode_switch(SWITCH_POWER_NORMAL, 0);
             return 0;
         }
@@ -712,7 +721,7 @@ static int cwmcu_read_temperature(struct CWMCU_data *sensor)
 		diff_t += curr_t - prv_t;
 		//printk(KERN_DEBUG "--CWMCU-- func : %s, line : %d\n",  __func__, __LINE__);
 		if (diff_t >= 10000000) {
-            cwmcu_powermode_switch(SWITCH_POWER_ENABLE,1);			
+			cwmcu_powermode_switch(SWITCH_POWER_POLL, 1);
 			/* read 6byte */
 			if (CWMCU_i2c_read(sensor, CW_TEMPERATURE_RAW_DATA_GET, data, 6) >= 0) {
 				data_event[0] = ((u32)CW_TEMPERATURE << 16) | (((u32)data[1] << 8) | (u32)data[0]);
@@ -725,9 +734,6 @@ static int cwmcu_read_temperature(struct CWMCU_data *sensor)
 							, (int16_t)((u32)data[3] << 8) | (u32)data[2]
 							, (int16_t)((u32)data[5] << 8) | (u32)data[4]
 							);
-
-        			//mdelay(20);
-				
 				input_report_abs(sensor->input, CW_ABS_X, data_event[0]);
 				input_report_abs(sensor->input, CW_ABS_Y, data_event[1]);
 				input_report_abs(sensor->input, CW_ABS_Z, data_event[2]);
@@ -742,7 +748,7 @@ static int cwmcu_read_temperature(struct CWMCU_data *sensor)
 				printk(KERN_DEBUG "--CWMCU-- CWMCU_i2c_read error 0x%x~!!!\n", CW_TEMPERATURE_RAW_DATA_GET);
 			}
 			diff_t = 0;
-			cwmcu_powermode_switch(SWITCH_POWER_ENABLE,0);
+			cwmcu_powermode_switch(SWITCH_POWER_POLL, 0);
 		}
 	}
 	prv_t = curr_t;
@@ -782,16 +788,18 @@ static ssize_t active_set(struct device *dev, struct device_attribute *attr, con
 
 	i = sensors_id / 8;
 	data = (u8)(sensor->enabled_list>>(i*8));
-	cwmcu_powermode_switch(SWITCH_POWER_ENABLE, 1);
 
 	while (error < RETRY_NUM) {
+		cwmcu_powermode_switch(SWITCH_POWER_ENABLE, 1);
 		if (CWMCU_i2c_write(sensor, CW_ENABLE_REG+i, &data, 1) < 0) {
 			printk("--CWMCU-- %s => i2c error~!!\n", __func__);
 			error++;
+			cwmcu_powermode_switch(SWITCH_POWER_ENABLE, 0);
 			continue;
 		} else {
 			VERBOSE("--CWMCU-- %s => i2c ok~!!\n", __func__);
 			error = RETRY_NUM;
+			cwmcu_powermode_switch(SWITCH_POWER_ENABLE, 0);
 		}
 	}
 	error = 0;
@@ -804,16 +812,18 @@ static ssize_t active_set(struct device *dev, struct device_attribute *attr, con
     buffer[1] = delay_ms;
 
 	while (error < RETRY_NUM) {
+		cwmcu_powermode_switch(SWITCH_POWER_ENABLE, 1);
 		if (CWMCU_write_i2c_block(sensor, CW_SENSOR_DELAY_SET, buffer, 2) < 0) {
 			printk("--CWMCU-- %s => i2c error~!!\n", __func__);
 			error++;
+			cwmcu_powermode_switch(SWITCH_POWER_ENABLE, 0);
 			continue;
 		} else {
 			VERBOSE("--CWMCU-- %s => i2c ok~!!\n", __func__);
 			error = RETRY_NUM;
+			cwmcu_powermode_switch(SWITCH_POWER_ENABLE, 0);
 		}
 	}
-	cwmcu_powermode_switch(SWITCH_POWER_ENABLE, 0);
 
 	return count;
 }
@@ -963,18 +973,19 @@ static ssize_t flush_set(struct device *dev, struct device_attribute *attr, cons
 	data = (uint8_t)sensors_id;
 	VERBOSE(KERN_DEBUG "--CWMCU-- flush sensors_id = %d~!!\n", sensors_id);
 
-    cwmcu_powermode_switch(SWITCH_POWER_BATCH, 1);
 	while (error < RETRY_NUM) {
+		cwmcu_powermode_switch(SWITCH_POWER_BATCH, 1);
 		if (CWMCU_i2c_write(sensor, CW_BATCHFLUSH, &data, 1) < 0) {
 			printk("--CWMCU-- %s i2c %d error~!!\n", __func__, data);
 			error++;
+			cwmcu_powermode_switch(SWITCH_POWER_BATCH, 0);
 			continue;
 		} else {
 			printk("--CWMCU-- %s i2c %d ok~!!\n", __func__, data);
 			error = RETRY_NUM;
+			cwmcu_powermode_switch(SWITCH_POWER_BATCH, 0);
 		}
 	}
-    cwmcu_powermode_switch(SWITCH_POWER_BATCH, 0);
 
 	return count;
 }
@@ -1167,6 +1178,22 @@ static ssize_t set_mcu_cmd(struct device *dev, struct device_attribute *attr, co
         }
         break;
 
+    case MCU_HWINFO_GET:
+        printk(KERN_DEBUG "CWMCU MCU_HWINFO_GET\n");
+        if (CWMCU_i2c_read(sensor, CW_HW_SENSORLIST, data, 7) >= 0) {
+            printk("--CWMCU-- HW_INFO: %d, %d, %d, %d, %d, %d, %d\n",
+                data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
+        }
+        break;
+
+    case MCU_MAG_DEBUG:
+        printk(KERN_DEBUG "CWMCU MCU_MAG_DEBUG\n");
+        if (CWMCU_i2c_read(sensor, CW_MAG_DEBUG, data, 22) >= 0) {
+            printk("--CWMCU-- MCU_MAG_DEBUG: %d, %d, %d, %d, %d, %d, %d, \n",
+                data[0], data[1], data[2], data[3], data[4], data[5], data[6]);
+        }
+        break;
+
     default:
             break;
     }
@@ -1353,16 +1380,21 @@ static ssize_t set_calibrator_data(struct device *dev,struct device_attribute *a
 static ssize_t version_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	uint8_t data[3] = {0};
+	uint8_t rty = 0;
 
     VERBOSE("--CWMCU-- %s\n", __func__);
 
-    if (cwmcu_get_version())
-        sensor->mcu_status = CW_INVAILD;
-    else {
-        sensor->mcu_status = CW_VAILD;
+    while (rty < 5) {
 		cwmcu_powermode_switch(SWITCH_POWER_NORMAL, 1);
         if (CWMCU_i2c_read(sensor, CW_FWVERSION, data, 3) >= 0) {
             printk("CHECK_FIRMWAVE_VERSION : %d.%d.%d\n", data[0], data[1], data[2]);
+			sensor->mcu_status = CW_VAILD;
+			cwmcu_powermode_switch(SWITCH_POWER_NORMAL, 0);
+			break;
+		} else {
+			rty++;
+			sensor->mcu_status = CW_INVAILD;
+			msleep(1);
         }
         cwmcu_powermode_switch(SWITCH_POWER_NORMAL, 0);
     }
@@ -1500,6 +1532,25 @@ static ssize_t pressure_show(struct device *dev, struct device_attribute *attr, 
 	return snprintf(buf, 50, "%d\n", sensor->pressure_data);
 }
 
+static int psensor_raw_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	uint8_t data[2] = {0};
+	uint16_t raw_data = 0;
+
+    VERBOSE("--CWMCU-- %s\n", __func__);
+
+	cwmcu_powermode_switch(SWITCH_POWER_NORMAL, 1);
+	if (CWMCU_i2c_read(sensor, CW_PSENSOR_DATA_GET, data, 2) >= 0) {
+		raw_data = ((uint16_t)data[1] << 8) | (uint16_t)data[0];
+		VERBOSE("--CWMCU-- psensor raw data: data[0]:%d, data[1]:%d, raw data:%d\n", data[0], data[1], raw_data);
+	} else {
+		printk("--CWMCU-- get psensor raw data failed\n");
+	}
+	cwmcu_powermode_switch(SWITCH_POWER_NORMAL, 0);
+
+    return snprintf(buf, 10, "%d\n", raw_data);
+}
+
 
 static DEVICE_ATTR(enable, 0664, active_show, active_set);
 static DEVICE_ATTR(delay_ms, 0664, interval_show, interval_set);
@@ -1520,6 +1571,8 @@ static DEVICE_ATTR(humidity_data, 0664, humidity_show, humidity_set);
 static DEVICE_ATTR(temperature_data, 0664, temperature_show, tempsensor_set);
 static DEVICE_ATTR(pressure_data, 0664, pressure_show, NULL);
 
+static DEVICE_ATTR(psensor_raw, 0666, psensor_raw_show, NULL);
+
 static struct attribute *sysfs_attributes[] = {
 	&dev_attr_enable.attr,
 	&dev_attr_delay_ms.attr,
@@ -1536,6 +1589,7 @@ static struct attribute *sysfs_attributes[] = {
 	&dev_attr_humidity_data.attr,
 	&dev_attr_temperature_data.attr,
 	&dev_attr_pressure_data.attr,	
+	&dev_attr_psensor_raw.attr,
 	NULL
 };
 
@@ -1694,7 +1748,11 @@ static void cwmcu_work_report(struct work_struct *work)
 	if (CWMCU_i2c_read(sensor, CW_INTERRUPT_STATUS, temp, 6) >= 0) {
 		sensor->interrupt_status = (u32)temp[1] << 8 | (u32)temp[0];
 		sensor->update_list = (u32)temp[5] << 24 | (u32)temp[4] << 16 | (u32)temp[3] << 8 | (u32)temp[2];
-		VERBOSE( "--CWMCU-- sensor->interrupt_status~ = %d\n", sensor->interrupt_status);
+		VERBOSE( "--CWMCU-- sensor->interrupt_status~ = %d, sensor->update_list = %d\n", sensor->interrupt_status, sensor->update_list);
+		if (sensor->interrupt_status  >= (1<<INTERRUPT_END)) {
+			printk( " irq error : %d!!\n", sensor->interrupt_status);
+			sensor->interrupt_status = 0;
+		}
 	} else {
 		printk( "--CWMCU-- check interrupt_status failed~!!\n");
 		sensor->interrupt_status = 0;

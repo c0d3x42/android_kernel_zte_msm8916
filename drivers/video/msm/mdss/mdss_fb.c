@@ -233,7 +233,6 @@ static void mdss_fb_set_bl_brightness(struct led_classdev *led_cdev,
 {
 	struct msm_fb_data_type *mfd = dev_get_drvdata(led_cdev->dev->parent);
 	int bl_lvl;
-	
 
 	if (value > mfd->panel_info->brightness_max)
 		value = mfd->panel_info->brightness_max;
@@ -242,7 +241,6 @@ static void mdss_fb_set_bl_brightness(struct led_classdev *led_cdev,
 	   driver backlight level 0 to bl_max with rounding */
 	MDSS_BRIGHT_TO_BL(bl_lvl, value, mfd->panel_info->bl_max,
 				mfd->panel_info->brightness_max);
-	pr_err("mdss_fb_set_bl_brightness ,bl_lvl=%d\n",bl_lvl);
 
 	if (!bl_lvl && value)
 		bl_lvl = 1;
@@ -948,7 +946,7 @@ static int mdss_fb_resume_sub(struct msm_fb_data_type *mfd)
 
 	INIT_COMPLETION(mfd->power_set_comp);
 	mfd->is_power_setting = true;
-	pr_err("mdss_fb resume index=%d\n", mfd->index);
+	pr_debug("mdss_fb resume index=%d\n", mfd->index);
 
 	mdss_fb_pan_idle(mfd);
 	ret = mdss_fb_send_panel_event(mfd, MDSS_EVENT_RESUME, NULL);
@@ -1097,18 +1095,19 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 	bool bl_notify_needed = false;
 	u32 bkl_lvl_new = bkl_lvl;
 
-	printk("mdss_fb_set_backlight enter!");
 	/* todo: temporary workaround to support doze mode */
 	if ((bkl_lvl == 0) && (mfd->doze_mode)) {
 		pr_debug("keeping backlight on with always-on displays\n");
 		mfd->unset_bl_level = 0;
 		return;
 	}
+    //zte add for when bkl_lvl=1, the backlight off.
 	if(bkl_lvl==1)
 	{
 		bkl_lvl_new = bkl_lvl+1;
 		temp=bkl_lvl_new;
 	}
+	//zte code end
 
 	if ((((mdss_fb_is_power_off(mfd) && mfd->dcm_state != DCM_ENTER)
 		|| !mfd->bl_updated) && !IS_CALIB_MODE_BL(mfd)) ||
@@ -1281,7 +1280,7 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 	if (mfd->dcm_state == DCM_ENTER)
 		return -EPERM;
 
-	pr_err("%pS mode:%d\n", __builtin_return_address(0),
+	pr_debug("%pS mode:%d\n", __builtin_return_address(0),
 		blank_mode);
 
 	cur_power_state = mfd->panel_power_state;
@@ -1327,7 +1326,7 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 	case FB_BLANK_NORMAL:
 	case FB_BLANK_POWERDOWN:
 	default:
-		pr_err("blank powerdown called. cur mode=%d, req mode=%d\n",
+		pr_debug("blank powerdown called. cur mode=%d, req mode=%d\n",
 			cur_power_state, req_power_state);
 		if (mdss_fb_is_power_on(mfd) && mfd->mdp.off_fnc) {
 			cur_power_state = mfd->panel_power_state;
@@ -1384,7 +1383,7 @@ static int mdss_fb_blank(int blank_mode, struct fb_info *info)
 			mfd->suspend.panel_power_state = MDSS_PANEL_POWER_OFF;
 		return 0;
 	}
-	pr_err("mode: %d\n", blank_mode);
+	pr_debug("mode: %d\n", blank_mode);
 
 	pdata = dev_get_platdata(&mfd->pdev->dev);
 
@@ -2085,7 +2084,7 @@ static int mdss_fb_open(struct fb_info *info, int user)
 	int result;
 	int pid = current->tgid;
 	struct task_struct *task = current->group_leader;
-    
+
 	if (mfd->shutdown_pending) {
 		pr_err("Shutdown pending. Aborting operation. Request from pid:%d name=%s\n",
 				pid, task->comm);
@@ -2213,6 +2212,11 @@ static int mdss_fb_release_all(struct fb_info *info, bool release_all)
 			pm_runtime_put(info->dev);
 		} while (release_all && pinfo->ref_cnt);
 
+//ftm shutdown flash bule screen of qualcomm patch recovery start yujinahua
+		/* we need to stop display thread before release */
+		if (release_all && mfd->disp_thread)
+			mdss_fb_stop_disp_thread(mfd);
+//ftm shutdown flash bule screen of qualcomm patch recovery end yujinahua
 		if (pinfo->ref_cnt == 0) {
 			list_del(&pinfo->list);
 			kfree(pinfo);
@@ -2242,12 +2246,34 @@ static int mdss_fb_release_all(struct fb_info *info, bool release_all)
 				task->comm, mfd->ref_cnt);
 		}
 	}
+//ftm shutdown flash bule screen of qualcomm patch recovery start yujinahua
+	if (release_needed) {
+		pr_debug("current process=%s pid=%d known pid=%d mfd->ref=%d\n",
+			task->comm, current->tgid, pid, mfd->ref_cnt);
 
-	if (!mfd->ref_cnt || release_all) {
+		if (mfd->mdp.release_fnc) {
+			ret = mfd->mdp.release_fnc(mfd, false, pid);
+			if (ret)
+				pr_err("error releasing fb%d for current pid=%d known pid=%d\n",
+					mfd->index, current->tgid, pid);
+		}
+	} else if (release_all && mfd->ref_cnt) {
+		pr_err("reference count mismatch with proc list entries\n");
+	}
+
+	if (!mfd->ref_cnt) {
+		if (mfd->mdp.release_fnc) {
+			ret = mfd->mdp.release_fnc(mfd, true, pid);
+			if (ret)
+				pr_err("error fb%d release current process=%s pid=%d known pid=%d\n",
+				    mfd->index, task->comm, current->tgid, pid);
+		}
+
+	//if (!mfd->ref_cnt || release_all) {
 		/* resources (if any) will be released during blank */
-		if (mfd->mdp.release_fnc)
-			mfd->mdp.release_fnc(mfd, true, pid);
-
+		//if (mfd->mdp.release_fnc)
+			//mfd->mdp.release_fnc(mfd, true, pid);
+//ftm shutdown flash bule screen of qualcomm patch recovery end yujinahua
 		if (mfd->fb_ion_handle)
 			mdss_fb_free_fb_ion_memory(mfd);
 
@@ -2266,17 +2292,19 @@ static int mdss_fb_release_all(struct fb_info *info, bool release_all)
 			return ret;
 		}
 		atomic_set(&mfd->ioctl_ref_cnt, 0);
-	} else if (release_needed) {
-		pr_debug("current process=%s pid=%d known pid=%d mfd->ref=%d\n",
-			task->comm, current->tgid, pid, mfd->ref_cnt);
+//ftm shutdown flash bule screen of qualcomm patch recovery start yujinahua
+	//} else if (release_needed) {
+		//pr_debug("current process=%s pid=%d known pid=%d mfd->ref=%d\n",
+			//task->comm, current->tgid, pid, mfd->ref_cnt);
 
-		if (mfd->mdp.release_fnc) {
-			ret = mfd->mdp.release_fnc(mfd, false, pid);
+		//if (mfd->mdp.release_fnc) {
+			//ret = mfd->mdp.release_fnc(mfd, false, pid);
 
 			/* display commit is needed to release resources */
-			if (ret)
-				mdss_fb_pan_display(&mfd->fbi->var, mfd->fbi);
-		}
+			//if (ret)
+				//mdss_fb_pan_display(&mfd->fbi->var, mfd->fbi);
+		//}
+//ftm shutdown flash bule screen of qualcomm patch recovery end yujinahua
 	}
 
 	return ret;

@@ -45,7 +45,7 @@
 			qcom,empty-soc-disabled;
 			qcom,fg-iterm-ma = <150>;
 			qcom,fg-ibatt-standby-ma = <200>;
-			qcom,fg-cc-to-cv-mv = <4260>;   /*TODO: check whether it is OK. */
+			qcom,fg-cc-to-cv-mv = <4330>;   /*TODO: check whether it is OK. */
 			qcom,thermistor-c1-coeff = <0x85EC>;   /*TODO: check NTC beta from HW engineer and search the value from Table 5-4 in SMB1360 datasheet */
 
 			qcom,charging-timeout = <0>;    /*TODO: "0" means safety timer disabled */

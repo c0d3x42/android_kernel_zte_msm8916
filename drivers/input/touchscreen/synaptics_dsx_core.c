@@ -544,6 +544,7 @@ static struct kobj_attribute virtual_key_map_attr = {
 	.show = synaptics_rmi4_virtual_key_map_show,
 };
 static int report_num = 0;
+//added by zte,begin
 static ssize_t mt_tpd_read(struct file *file, char __user *page, size_t size, loff_t *ppos)
 {
    int len = 0;
@@ -648,6 +649,7 @@ static ssize_t mt_tpd_read(struct file *file, char __user *page, size_t size, lo
     *ppos+=len;
     return len;
 }
+//added by zte,end
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static ssize_t synaptics_rmi4_full_pm_cycle_show(struct device *dev,
@@ -3714,12 +3716,14 @@ static int synaptics_rmi4_probe(struct platform_device *pdev)
 	struct synaptics_rmi4_data *rmi4_data;
 	const struct synaptics_dsx_hw_interface *hw_if;
 	const struct synaptics_dsx_board_data *bdata;
+    //added by zte, begin
 	struct proc_dir_entry *mt_entry = NULL;
     static const struct file_operations tsc_id = {
         .owner = THIS_MODULE,
         .read = mt_tpd_read,
         .write = NULL,
     };
+    //added by zte, end
 
 	if(tpd_existed == 1) {
 		printk("%s: touchscreen device have registered, break probe func, return....\n", __func__);
@@ -3875,11 +3879,13 @@ static int synaptics_rmi4_probe(struct platform_device *pdev)
 			goto err_sysfs;
 		}
 	}
+	//added by zte,begin
 	mt_entry = proc_create("driver/tsc_id", 0644, NULL, &tsc_id);
 	if (mt_entry)
 	    printk("create tsc_id success\n");
 	else
 	    printk("create tsc_id fail\n");
+  	//added by zte,end
 
 	exp_data.workqueue = create_singlethread_workqueue("dsx_exp_workqueue");
 	INIT_DELAYED_WORK(&exp_data.work, synaptics_rmi4_exp_fn_work);
@@ -4230,6 +4236,7 @@ static void synaptics_rmi4_enter_fb_suspend(struct synaptics_rmi4_data *rmi4_dat
 	//if (rmi4_data->full_pm_cycle)
 	//	synaptics_rmi4_suspend(&(rmi4_data->input_dev->dev));
 #ifdef ZTE_FEATURE_LCD_TP_POWERCTRL_F30	
+	//added by zte, for Power off, begin    
 	if (gpio_is_valid(bdata->lcd_reset_gpio)) {
 		synaptics_rmi4_gpio_setup(bdata->lcd_reset_gpio, 1, 1, 0);
 		gpio_set_value(bdata->lcd_reset_gpio, 0);
@@ -4258,6 +4265,7 @@ static void synaptics_rmi4_enter_fb_suspend(struct synaptics_rmi4_data *rmi4_dat
 		msleep(5);
 	}
 
+	//added by zte, for Power off, end
 #endif
 
 exit:

@@ -1963,11 +1963,13 @@ static int __init msm_serial_hsl_init(void)
 {
 	int ret;
 
+    // ZTE_MODIFY start for serial ctrl by dingli10091962
     if (NULL != strstr(saved_command_line, "serial_status=0"))
     {
         pr_err("serial disable\n");
         return -1;
     }
+    // ZTE_MODIFY end for serial ctrl by dingli10091962
     
 	ret = uart_register_driver(&msm_hsl_uart_driver);
 	if (unlikely(ret))

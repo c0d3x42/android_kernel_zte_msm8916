@@ -232,7 +232,7 @@ static int ltr559_ps_hsyteresis_threshold = 0;
 //#define APS_TAG                  "[ALS/PS] "
 //#define APS_DBG(fmt, args...)    printk(APS_TAG fmt, ##args) 
 
-static int ltr559_calibrate_dial(void);
+//static int ltr559_calibrate_dial(void);
 
 
 /*calibration*/
@@ -295,7 +295,7 @@ struct ltr559_data {
 	struct input_dev *als_input_dev;
 	struct input_dev *ps_input_dev;
 	struct workqueue_struct *workqueue;
-	struct delayed_work    als_dwork; 
+	struct delayed_work    als_dwork; /* @added by zte.for ALS polling mode*/
 	struct wake_lock ps_wake_lock;
 	//struct mutex bus_lock;
 	struct sensors_classdev als_cdev;
@@ -335,7 +335,7 @@ struct ltr559_data {
 	uint16_t *adc_levels;
 	/* Flag to suspend ALS on suspend or not */
 	uint8_t disable_als_on_suspend;
-	unsigned int als_poll_delay; 
+	unsigned int als_poll_delay; /* @added by zte.for ALS polling mode*/
 
 	/* PS */
 	uint8_t ps_enable_flag;
@@ -1080,6 +1080,7 @@ static uint16_t read_als_adc_value(struct ltr559_data *ltr559)
 #define AGC_HYS					15
 #define MAX_VAL					65535
 
+//@added by zte.If ALS data is not ready,return lux_val_prev,start
 	buffer[0] = ltr559_ALS_PS_STATUS;
 	ret = I2C_Read(buffer, 1);
 	als_ps_status = buffer[0];
@@ -1089,6 +1090,7 @@ static uint16_t read_als_adc_value(struct ltr559_data *ltr559)
 
 	    return lux_val_prev;
     }
+//@added by zte.If ALS data is not ready,return lux_val_prev,end
 	
 	/* ALS */
 	buffer[0] = ltr559_ALS_DATA_CH1_0;
@@ -1132,7 +1134,7 @@ static uint16_t read_als_adc_value(struct ltr559_data *ltr559)
 	ch1_val &= ALS_VALID_MEASURE_MASK;
 	/*input_report_abs(ltr559->als_input_dev, ABS_MISC, ch1_val);*/
 	/*input_sync(ltr559->als_input_dev);*/
-#if 0
+#if 0//@delete by zte 
 	buffer[0] = LTR559_ALS_PS_STATUS;
 	ret = I2C_Read(buffer, 1);
 	if (ret < 0) {
@@ -1175,6 +1177,7 @@ static uint16_t read_als_adc_value(struct ltr559_data *ltr559)
 	if ((ch0_val == 0) && (ch1_val > 50))
 		value = lux_val_prev;
 	else {
+//@modify by zte,[change als gain in old code,don't do this],start
 		value = ratioHysterisis(ch0_val, ch1_val);
 		
 #if 0 
@@ -1209,6 +1212,7 @@ static uint16_t read_als_adc_value(struct ltr559_data *ltr559)
 			}
 		}
 #endif
+//@modify by zte,[change als gain in old code,don't do this],end
 
 	}
 // 为了满足强光下线性的要求修改 ch0_val和ch1_val的和也不能超出最大值
@@ -2546,6 +2550,8 @@ static void report_ps_input_event(struct ltr559_data *ltr559)
 {
 	int8_t ret;
 	uint16_t adc_value;
+	int8_t rc;
+	uint8_t buffer[4];
 
 	adc_value = read_ps_adc_value(ltr559);
 
@@ -2602,14 +2608,25 @@ static void report_ps_input_event(struct ltr559_data *ltr559)
 				input_report_abs(ltr559->ps_input_dev,
 					ABS_DISTANCE, NEAR_VAL);
 				input_sync(ltr559->ps_input_dev);
+				rc = set_ps_range(ntf_final,2047,
+	                     LO_N_HI_LIMIT,ltr559);
+				printk("Now is near!!!\n");
 			}
 
 			if (adc_value < ntf_final) {
 				input_report_abs(ltr559->ps_input_dev,
 					ABS_DISTANCE, FAR_VAL);
 				input_sync(ltr559->ps_input_dev);
+				rc = set_ps_range(0x00,ftn_final,
+	                     LO_N_HI_LIMIT,ltr559);
+				printk("Now is far!!!\n");
 			}
-
+		buffer[0] = ltr559_PS_THRES_UP_0;
+        ret = I2C_Read(buffer, 4);
+        //printk("0x90 is %d\n",buffer[0]);
+        //printk("0x91 is %d\n",buffer[1]);
+        //printk("0x92 is %d\n",buffer[2]);
+        //printk("0x93 is %d\n",buffer[3]);
 		}
 		/* report NEAR or FAR to the user layer */
 
@@ -2651,7 +2668,7 @@ static void report_als_input_event(struct ltr559_data *ltr559)
 	input_sync(ltr559->als_input_dev);
 
 }
-
+/* @added by zte.for als polling mode,start */
 static void ltr559_als_polling_work_handler(struct work_struct *work)
 {
 	struct ltr559_data *data = container_of(work,
@@ -2665,7 +2682,7 @@ static void ltr559_als_polling_work_handler(struct work_struct *work)
 			&data->als_dwork,
 			msecs_to_jiffies(data->als_poll_delay));
 }
-
+/* @added by zte.for als polling mode,end */
 
 /* Work when interrupt */
 static void ltr559_schedwork(struct work_struct *work)
@@ -2804,7 +2821,7 @@ static int8_t ps_enable_init(struct ltr559_data *ltr559)
 		return rc;
 	}
 
-	rc = ps_ledPulseCount_setup(0x02, ltr559);
+	rc = ps_ledPulseCount_setup(0x04, ltr559);
 	if (rc < 0) {
 		dev_err(&ltr559->i2c_client->dev,
 			"%s: PS LED pulse count setup Fail...\n", __func__);
@@ -2951,7 +2968,7 @@ static int8_t als_enable_init(struct ltr559_data *ltr559)
 	}
 
 	/* Set minimummax thresholds where interrupt will *not* be generated */
-
+/* @delete by zte.Als polling mode,start */
 #if 0
 #if ACT_INTERRUPT
 	/*rc = set_als_range(ALS_MIN_MEASURE_VAL,
@@ -2968,7 +2985,7 @@ static int8_t als_enable_init(struct ltr559_data *ltr559)
 		return rc;
 	}
 #endif
-
+/* @delete by zte.Als polling mode,end */
 
     // rc = als_contr_setup(0x0C, ltr559);//als gain 8X
 	rc = als_contr_setup(0x00, ltr559);//als gain 1X
@@ -5929,12 +5946,12 @@ static int ltr559_setup(struct ltr559_data *ltr559)
 
 	/* Enable interrupts on the device and clear only when status is read */
 #if ACT_INTERRUPT
-
+/* @modify by zte. ALS polling mode,proximify for interrupt mode,start */
 	/*ret = _ltr559_set_bit(ltr559->i2c_client,
 			SET_BIT, ltr559_INTERRUPT, INT_MODE_ALSPS_TRIG);*/
 	ret = _ltr559_set_bit(ltr559->i2c_client, SET_BIT,
 				ltr559_INTERRUPT, INT_MODE_PS_TRIG);
-
+/* @modify by zte. ALS polling mode, proximify for interrupt mode, end*/
 #else
 	ret = _ltr559_set_bit(ltr559->i2c_client, SET_BIT,
 						ltr559_INTERRUPT, INT_MODE_00);
@@ -6013,6 +6030,11 @@ static int ltr559_enable_als_sensor(struct i2c_client *client, int val)
 		if (data->enable_als_sensor == 0) {
 			data->enable_als_sensor = 1;
 			rc = als_mode_setup((uint8_t)val, data);
+			{
+				int status;
+				status = i2c_smbus_read_byte_data(client,ltr559_ALS_PS_STATUS);
+				pr_err("%s: LTR559_STATUS_REG=%2d\n",__func__, status);				
+			}				
 			if (rc) {
 				dev_err(&client->dev, "Failed to setup ltr559\n");
 				return rc;
@@ -6077,8 +6099,13 @@ static int ltr559_enable_ps_sensor(struct i2c_client *client, int val)
 		if (data->enable_ps_sensor == 0) {
 			data->enable_ps_sensor = 1;
 			rc = ps_mode_setup((uint8_t)val, data);
-			ltr559_calibrate_dial();
+			//ltr559_calibrate_dial();
 			printk("dail calibration begin!!");
+			{
+				int status;
+				status = i2c_smbus_read_byte_data(client,ltr559_ALS_PS_STATUS);
+				pr_err("%s: LTR559_STATUS_REG=%2d\n",__func__, status);				
+			}	
 			if (rc) {
 				dev_err(&client->dev, "Failed to setup ltr559\n");
 				return rc;
@@ -6139,7 +6166,7 @@ static int ltr559_ps_set_enable(struct sensors_classdev *sensors_cdev,
 	return ltr559_enable_ps_sensor(data->i2c_client, enable);
 }
 
-
+/* @added by zte. ALS polling mode, start*/
 static int ltr559_set_als_poll_delay(struct i2c_client *client,
 		unsigned int val)
 {	
@@ -6186,8 +6213,9 @@ static int ltr559_als_poll_delay(struct sensors_classdev *sensors_cdev,
 	ltr559_set_als_poll_delay(data->i2c_client, delay_msec);
 	return 0;
 }
+/* @added by zte. ALS polling mode, end*/
 
-
+#if 0
 static void check_prox_mean(int prox_mean ,int *detection_threshold, int *hsyteresis_threshold)
 {
     int prox_threshold_hi_param, prox_threshold_lo_param;
@@ -6276,7 +6304,7 @@ static int ltr559_calibrate_dial(void)
     return cross_talk;
 }
 
-
+#endif
 /*add Prox sensor calibration begin by jiangchong,2015\01\07*/
 static int ltr559_ps_calibrate(struct sensors_classdev *sensors_cdev,
 		int axis, int apply_now)
@@ -6584,9 +6612,9 @@ static int ltr559_probe(struct i2c_client *client,
 		"%s: Setup Fail...\n", __func__);
 		goto err_ltr559_setup;
 	}
-
+/*@added by zte,als polling mode,start*/
 	INIT_DELAYED_WORK(&ltr559->als_dwork, ltr559_als_polling_work_handler); 
-
+/*@added by zte,als polling mode,end*/
 	/* Register the sysfs files */
 	sysfs_register_device(client);
 	/*sysfs_register_als_device(client, &ltr559->als_input_dev->dev);*/
@@ -6596,9 +6624,9 @@ static int ltr559_probe(struct i2c_client *client,
 	/* Register to sensors class */
 	ltr559->als_cdev = sensors_light_cdev;
 	ltr559->als_cdev.sensors_enable = ltr559_als_set_enable;
-
+/*@added by zte,als polling mode,start*/
 	ltr559->als_cdev.sensors_poll_delay = ltr559_als_poll_delay;//NULL
-
+/*@added by zte,als polling mode,end*/
 	memset(&ltr559->als_cdev.cal_result, 0,
 			sizeof(ltr559->als_cdev.cal_result));
 	ltr559->ps_cdev = sensors_proximity_cdev;
